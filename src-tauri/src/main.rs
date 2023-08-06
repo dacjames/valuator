@@ -3,29 +3,34 @@
 
 use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
-use tile::TileTrait;
 
 mod tile;
+mod tag;
+mod handle;
+mod constants;
+
+use tag::Tag;
+use tile::TileTrait;
+use handle::Handle;
 
 
-
-type TileMap<Cell> = BTreeMap<tile::Tag, tile::Tile<Cell>>;
+type TileMap<Cell> = BTreeMap<Tag, tile::Tile<Cell>>;
 struct Board<Cell: Default + Copy + ToString + std::fmt::Debug> {
-  next_tag: tile::Tag, 
+  next_tag: Tag, 
   tiles: TileMap<Cell>,
 }
 
 impl<Cell: Default + Copy + ToString + std::fmt::Debug> Default for Board<Cell> {
   fn default() -> Board<Cell> {
     Board {
-      next_tag: tile::Tag::default(),
+      next_tag: Tag::default(),
       tiles: TileMap::new(),
     }
   }
 }
 
 impl<Cell: Default + Copy + ToString + std::fmt::Debug> Board<Cell> {
-  fn add_tile(&mut self) -> tile::Tag{
+  fn add_tile(&mut self) -> Tag{
     let tile_tag = self.next_tag;
     self.tiles.insert(
       tile_tag, 
@@ -35,30 +40,54 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Board<Cell> {
     return tile_tag;
   }
 
-  fn tile(&self, tag: tile::Tag) -> &tile::Tile<Cell> {
+  fn get_tile(&self, tag: Tag) -> Option<&tile::Tile<Cell>> {
+    self.tiles.get(&tag)
+  }
+
+  fn tile(&self, tag: Tag) -> &tile::Tile<Cell> {
     return self.tiles.get(&tag).unwrap()
   }
 
-  fn get_hdl<const CARD: usize>(&self, handle: &impl tile::Handle<CARD>) -> Cell {
+  fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
     match self.tiles.get(&handle.tag()) {
       Some(tile) => tile.get_hdl(handle),
       None => Cell::default(),
     }
   }
 
-  fn get<const CARD: usize>(&self, tag: tile::Tag, pos: [usize; CARD]) -> Cell {
-    return self.get_hdl(&tag.handle(pos))
+  fn get_pos<const CARD: usize>(&self, tag: Tag, pos: [usize; CARD]) -> Cell {
+    return match self.get_tile(tag) {
+      Some(tile) => tile.get_pos(pos),
+      None => Cell::default(),
+    }
   }
 
-  fn set_hdl<const CARD: usize>(&mut self, handle: &impl tile::Handle<CARD>, data: Cell) {
+  fn get_lbl<const CARD: usize>(&self, tag: Tag, lblbs: [String; CARD]) -> Cell {
+    return match self.get_tile(tag) {
+      Some(tile) => tile.get_lbl(lblbs),
+      None => Cell::default(),
+    }
+  }
+
+  fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: Cell) {
     match self.tiles.get_mut(&handle.tag()) {
       Some(tile) => tile.set_hdl(handle, data),
       None => (),
     };
   }
 
-  fn set_pos<const CARD: usize>(&mut self, tag: tile::Tag, pos: [usize; CARD], data: Cell) {
-    self.set_hdl(&tag.handle(pos), data);
+  fn set_pos<const CARD: usize>(&mut self, tag: Tag, pos: [usize; CARD], data: Cell) {
+    match self.tiles.get_mut(&tag) {
+      Some(tile) => tile.set_pos(pos, data),
+      None => (),
+    };
+  }
+
+  fn set_lbl<const CARD: usize>(&mut self, tag: Tag, lbls: [String; CARD], data: Cell) {
+    match self.tiles.get_mut(&tag) {
+      Some(tile) => tile.set_lbl(lbls, data),
+      None => (),
+    };
   }
 
   fn len(&self) -> usize {
@@ -74,10 +103,10 @@ fn tile() -> tile::TileUi {
   let mut board: Board<f64> = Board::default();
   let tag = board.add_tile();
 
-  board.set_pos(tag, [0], 2.0);
-  board.set_pos(tag, [1], 17.5);
-  board.set_pos(tag, [2], 37.8);
-  board.set_pos(tag, [0, 1], 3.0);
+  board.set_pos(tag, [0, 0], 2.0);
+  board.set_pos(tag, [0, 1], 17.5);
+  board.set_pos(tag, [0, 2], 37.8);
+  board.set_pos(tag, [1, 0], 3.0);
 
   return board.tile(tag).render();
 }
