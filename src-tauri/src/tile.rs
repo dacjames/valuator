@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
-use std::cmp;
 
 use crate::tag::Tag;
 use crate::constants::*;
@@ -114,7 +112,6 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
   pub fn render(&self) -> TileUi {
     let c = self.cols;
     let r = self.rows;
-    let l = cmp::max(c, r);
     let mut cells = vec!["".to_string(); c*r];
 
     // 0, 0 => 0
@@ -125,7 +122,6 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
     // 1, 2 => 5
     for ic in 0..c {
       for ir in 0..r {
-        // cells[ir * c + ic] = self.get_pos([ir, ic]).to_string();
         cells[ir * c + ic] = self.get_pos([ic, ir]).to_string();
       }
     }
@@ -143,6 +139,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
 
 
 #[derive(Serialize, Deserialize, Debug)]
+#[allow(non_snake_case)]
 pub struct TileUi {
   rows: u32,
   cells: Vec<String>,
@@ -168,7 +165,7 @@ mod tests {
       assert_eq!([0, 0], t.pos_for(["A".to_owned(), "1".to_owned()]));
       assert_eq!([0, 1], t.pos_for(["A".to_owned(), "2".to_owned()]));
 
-      t.set_pos([0, 0],  1);
+      t.set_pos([0, 0], 1);
       t.set_pos([0, 1], 2);
       t.set_pos([1, 0], 3);
       t.set_pos([1, 1], 4);
