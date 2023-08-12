@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use serde::{Deserialize, Serialize};
 
-use crate::tile::{Tile, TileTrait};
+use crate::tile::{Tile, TileTrait, TileUi};
 use crate::tag::Tag;
 use crate::handle::Handle;
 
@@ -38,6 +39,10 @@ impl<Cell: Default + Copy + ToString + Debug> Board<Cell> {
 
   pub fn tile(&self, tag: Tag) -> &Tile<Cell> {
     return self.tiles.get(&tag).unwrap()
+  }
+
+  pub fn render_tile(&self, tag: Tag) -> TileUi {
+    return self.tiles.get(&tag).unwrap().render()
   }
 
   pub fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
@@ -86,4 +91,16 @@ impl<Cell: Default + Copy + ToString + Debug> Board<Cell> {
     self.tiles.len()
   }
 
+  pub fn render(&self) -> BoardUi {
+    return BoardUi { 
+      tiles: self.tiles.values().map(|t| { t.render() } ).collect(),
+    }
+  }
+
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[allow(non_snake_case)]
+pub struct BoardUi {
+  tiles: Vec<TileUi>,
 }

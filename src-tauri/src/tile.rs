@@ -127,6 +127,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
     }
 
     return TileUi { 
+      tag: self.tag,
       rows: r as u32, 
       cells: cells,
       colLabels: self.lbls.iter().take(c).cloned().collect(),
@@ -141,6 +142,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(non_snake_case)]
 pub struct TileUi {
+  tag: Tag,
   rows: u32,
   cells: Vec<String>,
   colLabels: Vec<String>,

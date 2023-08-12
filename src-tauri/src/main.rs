@@ -7,20 +7,24 @@ mod handle;
 mod constants;
 mod board;
 
-use std::{sync::Mutex};
+use std::sync::RwLock;
 
+use tag::Tag;
 use tauri::State;
 
 use board::Board;
+use tile::TileTrait;
 
 
 #[derive(Default)]
-struct BoardState(Mutex<Option<Board<f64>>>);
-
+struct BoardState{
+  board: RwLock<Board<f64>>
+}
 
 #[tauri::command]
-fn tile(state: State<'_, BoardState>) -> tile::TileUi {
-  let mut board = Board::default();
+fn tile(state: State<BoardState>) -> tile::TileUi {
+  let mut board = state.board.write().unwrap();
+
   let tag = board.add_tile();
 
   board.set_pos(tag, [0, 0], 2.0);
@@ -31,6 +35,60 @@ fn tile(state: State<'_, BoardState>) -> tile::TileUi {
   return board.tile(tag).render();
 }
 
+#[tauri::command]
+fn board(state: State<BoardState>) -> board::BoardUi {
+  let board = state.board.read().unwrap();
+  // let board = Board::<f64>::default();
+
+  board.render()
+}
+
+#[tauri::command]
+fn add_tile(state: State<BoardState>) -> board::BoardUi {
+  let mut board = state.board.write().unwrap();
+
+  let tag = board.add_tile();
+
+  board.set_pos(tag, [0, 0], 2.0);
+  board.set_pos(tag, [0, 1], 17.5);
+  board.set_pos(tag, [0, 2], 37.8);
+  board.set_pos(tag, [1, 0], 3.0);
+
+  board.render()
+}
+
+#[tauri::command]
+fn add_column(state: State<BoardState>, tag: Tag) -> board::BoardUi {
+  let mut board = state.board.write().unwrap();
+
+  let cols = board.tile(tag).cols;
+  // println!("wtf: {:?}", cols);
+  board.set_pos(tag, [cols], 0.0);
+
+  return board.render()
+}
+
+#[tauri::command]
+fn add_row(state: State<BoardState>, tag: Tag) -> board::BoardUi {
+  let mut board = state.board.write().unwrap();
+
+  let rows = board.tile(tag).rows;
+  let cols = board.tile(tag).cols;
+  // println!("wtf: {:?} {:?}", cols, rows);
+  board.set_pos(tag, [cols - 1, rows], 0.0);
+
+  return board.render()
+}
+
+#[tauri::command]
+fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: String) -> board::BoardUi {
+  let mut board = state.board.write().unwrap();
+
+  let data = value.parse::<f64>().unwrap_or(0.0);
+  board.set_pos(tag, pos, data);
+
+  return board.render()
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -39,9 +97,15 @@ fn greet(name: &str) -> String {
 
 fn main() {
   tauri::Builder::default()
-    .manage::<BoardState>( BoardState( Mutex::new(Some( Board::<f64>::default() )) ))
-    .invoke_handler(tauri::generate_handler![greet])
-    .invoke_handler(tauri::generate_handler![tile])
+    .manage::<BoardState>( BoardState{ board: RwLock::new(Board::<f64>::default()) })
+    .invoke_handler(tauri::generate_handler![
+        board, 
+        tile,
+        add_tile,
+        add_column,
+        add_row,
+        update_cell,
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
