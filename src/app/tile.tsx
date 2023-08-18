@@ -29,7 +29,6 @@ function TileRow(props: {
 
   function updateCell(tag: number, pos: Array<number>) {
     return (event: any) => {
-      console.log(event.target.value);
       invoke<BoardUi>('update_cell', {tag: tag, pos: pos, value: event.target.value})
         .then(setBoard).catch(console.error)
     }
