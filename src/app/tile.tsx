@@ -30,29 +30,31 @@ function TileCell(props: {
   const inputRef: MutableRefObject<HTMLInputElement> = useRef(null as unknown as HTMLInputElement);
   const [visibility, setVisibility] = useState(false);
 
-  function updateCell(tag: number, pos: Array<number>) {
+  function cellUpdater(tag: number, pos: Array<number>) {
     return (event: any) => {
       invoke<BoardUi>('update_cell', {tag: tag, pos: pos, value: event.target.value})
         .then(setBoard).catch(console.error)
     }
   }
 
+  function toggle() {
+    setVisibility(!visibility); 
+  }
+
+  function focuser(inputRef: any) {
+    return () => inputRef.current.focus()
+  } 
+
   return <td className="relative z-0 border-b border-slate-200 p-4 pl-8 text-slate-400 bg-white" 
               key={props.index}>
       <div className={`${visibility? 'invisible' : 'visible'}`}
-          onClick={() => { 
-            setVisibility(!visibility); 
-            console.log('onclick ref', inputRef); 
-            setTimeout(() => inputRef.current.focus(), 0);
-          }}>
+           onClick={() => { toggle(); setTimeout(focuser(inputRef), 0); }}>
         {props.item}
       </div>
-      <input className={`border-2 absolute inset-0 ${ visibility? 'visible' : 'invisible'}`}
+      <input className={`border-2 absolute inset-0 ${visibility? 'visible' : 'invisible'}`}
         ref={inputRef}
-        id={`cell-${props.index}-${props.row}`}
-        onFocus={() => console.log('focus', inputRef)}
-        onChange={updateCell(props.tag, [props.index, props.row])}
-        onBlur={(e) => { setVisibility(!visibility); console.log('ref', inputRef) }} 
+        onChange={cellUpdater(props.tag, [props.index, props.row])}
+        onBlur={toggle} 
         defaultValue={props.item.toString()}>
       </input>
   </td>
@@ -65,7 +67,6 @@ function TileRow(props: {
   rowData: Array<String>,
   label: String,
 }) {
-  
   return <tr>
     <th className='border-b font-medium p-4 pl-8 pb-3 text-slate-400 bg-slate-100 text-left' key={-1}>{props.label}</th>
     {props.rowData.map((item: String, index: number) => {
