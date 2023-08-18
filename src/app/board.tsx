@@ -27,7 +27,7 @@ interface BoardState {
   setBoard: Dispatch<SetStateAction<BoardUi>>,
 }
 
-export const BoardContext = createContext({board: defaultBoard(), setBoard: (_: any) => {}});
+export const BoardContext = createContext({board: defaultBoard(), setBoard: (_: SetStateAction<BoardUi>) => {}});
 
 export function BoardApp() {
   const [board, setBoard] = useState(defaultBoard());

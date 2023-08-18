@@ -3,7 +3,8 @@
 import { useEffect, useState, createContext, useContext, Dispatch, SetStateAction } from 'react'
 import { invoke } from '@tauri-apps/api/tauri'
 import { headers } from 'next/dist/client/components/headers'
-import { BoardContext, BoardUi } from './board'
+import Board, { BoardContext, BoardUi } from './board'
+import { useRef, MutableRefObject } from 'react';
 
 function TileHeader(props: {
   headers: Array<String>,
@@ -19,13 +20,15 @@ function TileHeader(props: {
   </thead>
 }
 
-function TileRow(props: {
+function TileCell(props: {
   tag: number,
   row: number,
-  rowData: Array<String>,
-  label: String,
+  item: String,
+  index: number,
 }) {
   const {board, setBoard} = useContext(BoardContext);
+  const inputRef: MutableRefObject<HTMLInputElement> = useRef(null as unknown as HTMLInputElement);
+  const [visibility, setVisibility] = useState(false);
 
   function updateCell(tag: number, pos: Array<number>) {
     return (event: any) => {
@@ -34,15 +37,39 @@ function TileRow(props: {
     }
   }
 
+  return <td className="relative z-0 border-b border-slate-200 p-4 pl-8 text-slate-400 bg-white" 
+              key={props.index}>
+      <div className={`${visibility? 'invisible' : 'visible'}`}
+          onClick={() => { 
+            setVisibility(!visibility); 
+            console.log('onclick ref', inputRef); 
+            setTimeout(() => inputRef.current.focus(), 0);
+          }}>
+        {props.item}
+      </div>
+      <input className={`border-2 absolute inset-0 ${ visibility? 'visible' : 'invisible'}`}
+        ref={inputRef}
+        id={`cell-${props.index}-${props.row}`}
+        onFocus={() => console.log('focus', inputRef)}
+        onChange={updateCell(props.tag, [props.index, props.row])}
+        onBlur={(e) => { setVisibility(!visibility); console.log('ref', inputRef) }} 
+        defaultValue={props.item.toString()}>
+      </input>
+  </td>
+
+}
+
+function TileRow(props: {
+  tag: number,
+  row: number,
+  rowData: Array<String>,
+  label: String,
+}) {
+  
   return <tr>
     <th className='border-b font-medium p-4 pl-8 pb-3 text-slate-400 bg-slate-100 text-left' key={-1}>{props.label}</th>
     {props.rowData.map((item: String, index: number) => {
-      return <td className="border-b border-slate-200 p-4 pl-8 text-slate-400 bg-white" 
-                 key={index}>
-                  {item}
-                  <br/>
-                  <input onChange={updateCell(props.tag, [index, props.row])} defaultValue={item.toString()}></input>
-                </td>
+      return <TileCell item={item} tag={props.tag} index={index} row={props.row}/>
     })}
   </tr>
 }
