@@ -3,8 +3,9 @@
 import { useEffect, useState, createContext, useContext, Dispatch, SetStateAction } from 'react'
 import { invoke } from '@tauri-apps/api/tauri'
 import { headers } from 'next/dist/client/components/headers'
-import Board, { BoardContext, BoardUi } from './board'
+import Board, { BoardContext } from './board'
 import { useRef, MutableRefObject } from 'react';
+import { TileUi, BoardUi, CellUi,TypeUi, ValueUi } from './rpc';
 
 function TileHeader(props: {
   headers: Array<String>,
@@ -20,10 +21,34 @@ function TileHeader(props: {
   </thead>
 }
 
+function renderValue(value: ValueUi): any {
+  switch (value.typ) {
+    case TypeUi.Number: return <div>
+      {value.value as String}
+    </div>
+
+    case TypeUi.List: 
+    const values = value.value as String[];
+    return <table>
+        <tbody ><tr> {values.map((v) => {
+            return <td className='border'>{v}</td>
+        })}</tr></tbody>
+    </table>
+
+    case TypeUi.Boolean: return <div>
+      {!!value.value ? "true" : "false"}
+    </div>
+
+    default: return <div>
+      {(()=>{console.log(value); return "Unknown Cell Value with Type: "+value.typ})()}
+    </div>
+  }
+}
+
 function TileCell(props: {
   tag: number,
   row: number,
-  item: String,
+  item: CellUi,
   index: number,
 }) {
   const {board, setBoard} = useContext(BoardContext);
@@ -32,6 +57,7 @@ function TileCell(props: {
 
   function cellUpdater(tag: number, pos: Array<number>) {
     return (event: any) => {
+      console.log('wtf', event.target.value);
       invoke<BoardUi>('update_cell', {tag: tag, pos: pos, value: event.target.value})
         .then(setBoard).catch(console.error)
     }
@@ -49,13 +75,13 @@ function TileCell(props: {
               key={props.index}>
       <div className={`${visibility? 'invisible' : 'visible'}`}
            onClick={() => { toggle(); setTimeout(focuser(inputRef), 0); }}>
-        {props.item}
+        {renderValue(props.item.value)}
       </div>
       <input className={`border-2 absolute inset-0 ${visibility? 'visible' : 'invisible'}`}
         ref={inputRef}
         onChange={cellUpdater(props.tag, [props.index, props.row])}
         onBlur={toggle} 
-        defaultValue={props.item.toString()}>
+        defaultValue={props.item.value.value.toString()}>
       </input>
   </td>
 
@@ -64,31 +90,17 @@ function TileCell(props: {
 function TileRow(props: {
   tag: number,
   row: number,
-  rowData: Array<String>,
+  rowData: Array<CellUi>,
   label: String,
 }) {
   return <tr>
     <th className='border-b font-medium p-4 pl-8 pb-3 text-slate-400 bg-slate-100 text-left' key={-1}>{props.label}</th>
-    {props.rowData.map((item: String, index: number) => {
+    {props.rowData.map((item: CellUi, index: number) => {
       return <TileCell item={item} tag={props.tag} index={index} row={props.row}/>
     })}
   </tr>
 }
 
-/**
- * UI Data for a Tile.
- * 
- * @interface TileUi 
- * @member rows is the number of rows in tile
- * @member cells contains the cell contents in row-major order
- */
-export interface TileUi {
-  tag: number,
-  rows: number,
-  cells: Array<String>,
-  rowLabels: Array<String>,
-  colLabels: Array<String>,
-}
 
 
 export default function Tile( props: {

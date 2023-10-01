@@ -1,16 +1,18 @@
-use serde::{Serialize, Deserialize};
+
 
 use crate::tag::Tag;
 use crate::constants::*;
 use crate::handle::Handle;
+use crate::cell::CellOps;
+use crate::rpc::{TileUi, CellUi, TypeUi, ValueUi};
 
 #[derive(Debug)]
-struct CellData<Cell: Default + Copy + std::fmt::Debug, const N: usize> {
+struct CellData<Cell: CellOps, const N: usize> {
   cells: [Cell; N],
 }
  
 #[derive(Debug)]
-pub struct Tile<Cell: Default + Copy + std::fmt::Debug>{
+pub struct Tile<Cell: CellOps>{
   pub tag: Tag,
   pub rows: usize,
   pub cols: usize,
@@ -18,21 +20,21 @@ pub struct Tile<Cell: Default + Copy + std::fmt::Debug>{
   lbls: [String; ROW_MAX + COL_MAX], 
 }
 
-pub trait TileTrait<Cell: Default + Copy + ToString + std::fmt::Debug> {
-  fn new(tag: Tag) -> Tile<Cell>;
+pub trait TileTrait<V: CellOps> {
+  fn new(tag: Tag) -> Tile<V>;
   fn len(&self) -> usize;
 
-  fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell;
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell;
-  fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> Cell;
+  fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> V;
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> V;
+  fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> V;
 
-  fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: Cell); 
-  fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: Cell);
-  fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: Cell);
+  fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: V); 
+  fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: V);
+  fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: V);
 }
 
 
-impl<Cell: Default + Copy + ToString + std::fmt::Debug> TileTrait<Cell> for Tile<Cell>{
+impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
   fn new(tag: Tag) -> Tile<Cell> {
     let mut lbls: [String; ROW_MAX + COL_MAX] = Default::default();
 
@@ -43,12 +45,14 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> TileTrait<Cell> for Tile
     (1 ..= ROW_MAX).take(ROW_MAX).enumerate().for_each( |(i, n)| {
       lbls[COL_MAX + i] = n.to_string();
     });
+
+    let cells: [Cell; ROW_MAX * COL_MAX] = std::array::from_fn(|_| Cell::default());
     
     return Tile {
       tag: tag,
       rows: 0,
       cols: 0,
-      data: CellData {  cells: [Cell::default(); {ROW_MAX * COL_MAX}] },
+      data: CellData { cells: cells },
       lbls: lbls,
     }
   }
@@ -58,7 +62,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> TileTrait<Cell> for Tile
   }
 
   fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
-    return self.data.cells[handle.index()];
+    return self.data.cells[handle.index()].clone();
   }
 
   fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell {
@@ -91,7 +95,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> TileTrait<Cell> for Tile
   }
 }
 
-impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
+impl<Cell: CellOps> Tile<Cell> {
 
   fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
     let mut pos: [usize; CARD] = [0; CARD];
@@ -112,7 +116,8 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
   pub fn render(&self) -> TileUi {
     let c = self.cols;
     let r = self.rows;
-    let mut cells = vec!["".to_string(); c*r];
+    let mut cells: Vec<CellUi> = vec![Default::default(); c*r];
+    // let mut cells: Vec<CellUi> = Vec::with_capacity(c*r);
 
     // 0, 0 => 0
     // 0, 1 => 2
@@ -122,7 +127,7 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
     // 1, 2 => 5
     for ic in 0..c {
       for ir in 0..r {
-        cells[ir * c + ic] = self.get_pos([ic, ir]).to_string();
+        cells[ir * c + ic] = self.get_pos([ic, ir]).render();
       }
     }
 
@@ -139,18 +144,12 @@ impl<Cell: Default + Copy + ToString + std::fmt::Debug> Tile<Cell> {
 
 
 
-#[derive(Serialize, Deserialize, Debug)]
-#[allow(non_snake_case)]
-pub struct TileUi {
-  tag: Tag,
-  rows: u32,
-  cells: Vec<String>,
-  colLabels: Vec<String>,
-  rowLabels: Vec<String>,
-}
+
 
 #[cfg(test)]
 mod tests {
+    use crate::rpc::ScalarValueUi;
+
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
@@ -217,11 +216,19 @@ mod tests {
         "B".to_owned(),
       ]);
 
-      let expected_cells: Vec<String> = vec![
+      fn string_cell(value: &str) -> CellUi {
+        return CellUi { 
+          value: ValueUi::V(ScalarValueUi{typ: TypeUi::String, value: value.to_owned()}), 
+          formula: value.to_owned(), 
+          style: String::new(), 
+        }
+      }
+
+      let expected_cells: Vec<CellUi> = vec![
         // COL: A          COL: B
-        "1".to_owned(), "4".to_owned(),  // ROW: 1
-        "2".to_owned(), "5".to_owned(),  // ROW: 2
-        "3".to_owned(), "6".to_owned(),  // ROW: 3  
+        string_cell("1"), string_cell("4"),  // ROW: 1
+        string_cell("2"), string_cell("5"),  // ROW: 2
+        string_cell("3"), string_cell("6"),  // ROW: 3  
        ];
 
       assert_eq!(ui.cells, expected_cells);

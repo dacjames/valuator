@@ -6,23 +6,28 @@ mod tag;
 mod handle;
 mod constants;
 mod board;
+mod cell;
+mod rpc;
+mod parser;
 
 use std::sync::RwLock;
 
+use rpc::TileUi;
 use tag::Tag;
 use tauri::State;
 
 use board::Board;
-use tile::TileTrait;
+use cell::Cell;
+use rpc::CellUi;
 
 
 #[derive(Default)]
 struct BoardState{
-  board: RwLock<Board<f64>>
+  board: RwLock<Board<Cell>>
 }
 
 #[tauri::command]
-fn tile(state: State<BoardState>) -> tile::TileUi {
+fn tile(state: State<BoardState>) -> TileUi {
   let mut board = state.board.write().unwrap();
 
   let tag = board.add_tile();
@@ -53,6 +58,9 @@ fn add_tile(state: State<BoardState>) -> board::BoardUi {
   board.set_pos(tag, [0, 1], 17.5);
   board.set_pos(tag, [0, 2], 37.8);
   board.set_pos(tag, [1, 0], 3.0);
+
+  board.set_pos(tag, [1, 1], vec![1.0, 2.0]);
+  board.set_pos(tag, [1, 2], true);
 
   board.render()
 }
@@ -97,7 +105,7 @@ fn greet(name: &str) -> String {
 
 fn main() {
   tauri::Builder::default()
-    .manage::<BoardState>( BoardState{ board: RwLock::new(Board::<f64>::default()) })
+    .manage::<BoardState>( BoardState{ board: RwLock::new(Board::<Cell>::default()) })
     .invoke_handler(tauri::generate_handler![
         board, 
         tile,

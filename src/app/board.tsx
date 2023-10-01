@@ -1,20 +1,10 @@
 'use client'
 
 import { Context, Dispatch, SetStateAction, createContext, useContext, useEffect, useState } from 'react'
-import { TileUi} from './tile'
+import { TileUi, BoardUi } from './rpc'
 import Tile from './tile'
 import { invoke } from '@tauri-apps/api/tauri'
 import { headers } from 'next/dist/client/components/headers'
-
-/**
- * UI Data for a Tile.
- * 
- * @interface BoardUi
- * @member tiles list of tiles in the board
- */
-export interface BoardUi {
-  tiles: Array<TileUi>,
-}
 
 function defaultBoard(): BoardUi {
   return {
