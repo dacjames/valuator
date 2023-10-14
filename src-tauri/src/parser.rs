@@ -10,30 +10,30 @@ use crate::cell::Value;
 struct Token(u64);
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct Node(u32);
+struct NodeId(u32);
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum Ast {
+enum Node {
     Leaf{leaf: Token, value: Value},
-    OpBin{op: Token, lhs: Node, rhs: Node},
-    OpUni{op: Token, rhs: Node},
+    OpBin{op: Token, lhs: NodeId, rhs: NodeId},
+    OpUni{op: Token, rhs: NodeId},
 }
 
 
-use Ast::*;
+use Node::*;
 
 struct Formula {
     bytes: String,
     tokens: Vec<Token>,
-    nodes: Vec<Ast>,
+    nodes: Vec<Node>,
 }
 
 trait EvalContext {
-  fn get_ast(&self, node: &Node) -> &Ast;
+  fn get_ast(&self, node: &NodeId) -> &Node;
 }
 
 struct EvalState {
-  nodes: HashMap<Node, Ast>
+  nodes: HashMap<NodeId, Node>
 }
 
 impl EvalState {
@@ -42,18 +42,25 @@ impl EvalState {
       nodes: HashMap::new(),
     }
   }
-  fn insert(&mut self, node: Node, ast: Ast) {
+
+  fn insert(&mut self, node: NodeId, ast: Node) {
     self.nodes.insert(node, ast);
+  }
+
+  fn load(&mut self, tree: &Vec<Node>) {
+    for (i, ast) in tree.iter().enumerate() {
+      self.insert(NodeId(i as u32), ast.to_owned())
+    }
   }
 }
 
 impl EvalContext for EvalState {
-  fn get_ast(&self, node: &Node) -> &Ast {
+  fn get_ast(&self, node: &NodeId) -> &Node {
     self.nodes.get(node).unwrap()
   }
 }
 
-impl Ast {
+impl Node {
   pub fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
       Leaf{leaf, value} => value.to_owned(),
@@ -79,36 +86,37 @@ impl Ast {
 
 #[cfg(test)]
 mod tests {
-  // Note this useful idiom: importing names from outer (for mod tests) scope.
   use super::*;
 
   #[test]
   fn test_parser_basics() {
-    use Ast::*;
+    use Node::*;
     use Value::*;
 
-    let mut state = EvalState::new();
-    let tree = vec![
-      Leaf{leaf: Token(0), value: N(Decimal::new(1, 0))},
-      Leaf{leaf: Token(0), value: N(Decimal::new(2, 0))},
-      Leaf{leaf: Token(0), value: I(2 as i64)},
-      Leaf{leaf: Token(0), value: F(2.0_f64)},
-      OpBin{op: Token(0), lhs: Node(0), rhs: Node(1)},
-      OpBin{op: Token(0), lhs: Node(0), rhs: Node(2)},
-      OpBin{op: Token(0), lhs: Node(0), rhs: Node(3)},
-    ];
-
-    for (i, ast) in tree.iter().enumerate() {
-      state.insert(Node(i as u32), ast.to_owned())
+    fn dec(num: i64, scale: u32) -> Decimal {
+      Decimal::new(num, scale)
     }
 
-    let r1 = tree.get(tree.len()-3).unwrap().eval(&state);
-    assert_eq!(r1, N(Decimal::new(3, 0)));
+    let mut state = EvalState::new();
+    let ast = vec![
+      Leaf{leaf: Token(0), value: N(dec(1, 0))},
+      Leaf{leaf: Token(0), value: N(dec(2, 0))},
+      Leaf{leaf: Token(0), value: I(2)},
+      Leaf{leaf: Token(0), value: F(2.0)},
+      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(1)},
+      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(2)},
+      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(3)},
+    ];
 
-    let r2 = tree.get(tree.len()-2).unwrap().eval(&state);
-    assert_eq!(r2, N(Decimal::new(3, 0)));
+    state.load(&ast);    
+
+    let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
+    assert_eq!(r1, N(dec(3, 0)));
+
+    let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
+    assert_eq!(r2, N(dec(3, 0)));
     
-    let r3 = tree.get(tree.len()-1).unwrap().eval(&state);
-    assert_eq!(r3, N(Decimal::new(3, 0)));
+    let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(r3, N(dec(3, 0)));
   }
 }
