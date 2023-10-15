@@ -5,7 +5,26 @@ use rust_decimal::{Decimal, prelude::FromPrimitive};
 use crate::cell::Value;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct Token(u64);
+struct Token {
+  pos: u32,
+  len: u32,
+}
+
+impl Token {
+  fn new(orig: usize, curr: usize) -> Token {
+    if curr < orig {
+      panic!("Negative token length!")
+    }
+    Token { 
+      pos: orig as u32, 
+      len: (curr - orig) as u32,
+    }
+  }
+}
+
+
+// struct Token(u64);
+
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeId(u32);
@@ -91,9 +110,6 @@ impl Parser {
       pos: 0,
     }
   }
-}
-
-impl ParserOps<char> for Parser {
   fn get_pos(&self) -> usize {
       self.pos
   }
@@ -106,7 +122,7 @@ impl ParserOps<char> for Parser {
     Some(*item)
   }
 
-  fn like(&mut self, needle: char) -> Option<char> {
+  fn like_char(&mut self, needle: char) -> Option<char> {
     let mut item = self.next()?;
     while item == ' ' || item == '\n' || item == '\t' {
       item = self.next()?;
@@ -117,6 +133,17 @@ impl ParserOps<char> for Parser {
       None
     }
   }
+
+  fn like_str<S: Into<String>>(&mut self, needle: S) -> Option<char> {
+    let needle_string: String = needle.into();
+    let mut iter = needle_string.chars();
+    let mut res = self.like_char(iter.next()?)?;
+    for ch in iter {
+      res = self.like_char(ch)?;
+    }
+    Some(res)
+  }
+
   fn exact(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
     if item == needle { 
@@ -125,54 +152,56 @@ impl ParserOps<char> for Parser {
       None
     }
   }
-} 
 
-trait ParserOps<T> {
-  fn get_pos(&self) -> usize;
-  fn set_pos(&mut self, p: usize);
-  fn next(&mut self) -> Option<T>;
-  fn like(&mut self, needle: char) -> Option<T>;
-  fn exact(&mut self, needle: char) -> Option<T>;
-
-  fn r_one(&mut self) -> Option<T> {
-    self.like('1')
-  }
-  fn r_plus(&mut self) -> Option<T> {
-    self.like('+')
-  }
-  fn r_minus(&mut self) -> Option<T> {
-    self.like('-')
-  }
-  fn r_mult(&mut self) -> Option<T> {
-    self.like('*')
-  }
-  fn r_div(&mut self) -> Option<T> {
-    self.like('/')
-  }
-  fn r_lpar(&mut self) -> Option<T> {
-    self.like('(')
-  }
-  fn r_rpar(&mut self) -> Option<T> {
-    self.like(')')
+  fn r_one(&mut self) -> Option<char> {
+    self.like_char('1')
   }
 
-  fn r_term1(&mut self) -> Option<T> {
+  fn r_ten(&mut self) -> Option<char> {
+    self.like_str("10")
+  }
+
+  fn r_plus(&mut self) -> Option<char> {
+    self.like_str("+")
+  }
+  fn r_minus(&mut self) -> Option<char> {
+    self.like_char('-')
+  }
+  fn r_mult(&mut self) -> Option<char> {
+    self.like_char('*')
+  }
+  fn r_div(&mut self) -> Option<char> {
+    self.like_char('/')
+  }
+  fn r_lpar(&mut self) -> Option<char> {
+    self.like_char('(')
+  }
+  fn r_rpar(&mut self) -> Option<char> {
+    self.like_char(')')
+  }
+
+  fn r_term1(&mut self) -> Option<char> {
+    self.r_ten()
+  }
+
+  fn r_term2(&mut self) -> Option<char> {
     self.r_one()
   }
 
-  fn r_term2(&mut self) -> Option<T> {
+  fn r_term3(&mut self) -> Option<char> {
     self.r_lpar()?;
     let expr = self.r_expr()?;
     self.r_rpar()?;
     Some(expr)
   }
 
-  fn r_term(&mut self) -> Option<T> {
+  fn r_term(&mut self) -> Option<char> {
     let pos = self.get_pos();
 
     for expr in [
       |s: &mut Self|{s.r_term1()},
       |s: &mut Self|{s.r_term2()},
+      |s: &mut Self|{s.r_term3()},
     ] {
       match expr(self) {
         Some(e) => return Some(e),
@@ -183,7 +212,7 @@ trait ParserOps<T> {
     None
   }
 
-  fn r_binop(&mut self) -> Option<T> {
+  fn r_binop(&mut self) -> Option<char> {
     let pos = self.get_pos();
 
     for expr in [
@@ -201,18 +230,18 @@ trait ParserOps<T> {
     None
   }
 
-  fn r_expr1(&mut self) -> Option<T> {
+  fn r_expr1(&mut self) -> Option<char> {
     self.r_term()?;
     let op = self.r_binop()?;
     self.r_expr()?;
     Some(op)
   }
 
-  fn r_expr2(&mut self) -> Option<T> {
+  fn r_expr2(&mut self) -> Option<char> {
     self.r_term()
   }
 
-  fn r_expr(&mut self) -> Option<T>  {
+  fn r_expr(&mut self) -> Option<char>  {
     let pos = self.get_pos();
 
     for expr in [
@@ -244,6 +273,9 @@ mod tests {
 
     p = Parser::new("1  ");
     assert_eq!(p.r_expr(), Some('1'));
+
+    p = Parser::new("10");
+    assert_eq!(p.r_expr(), Some('0'));
 
     p = Parser::new("1+1");
     assert_eq!(p.r_expr(), Some('+'));
@@ -279,13 +311,13 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{leaf: Token(0), value: N(dec(1, 0))},
-      Leaf{leaf: Token(0), value: N(dec(2, 0))},
-      Leaf{leaf: Token(0), value: I(2)},
-      Leaf{leaf: Token(0), value: F(2.0)},
-      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(1)},
-      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(2)},
-      OpBin{op: Token(0), lhs: NodeId(0), rhs: NodeId(3)},
+      Leaf{leaf: Token::new(0,0), value: N(dec(1, 0))},
+      Leaf{leaf: Token::new(0,0), value: N(dec(2, 0))},
+      Leaf{leaf: Token::new(0,0), value: I(2)},
+      Leaf{leaf: Token::new(0,0), value: F(2.0)},
+      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(1)},
+      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(2)},
+      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);    
