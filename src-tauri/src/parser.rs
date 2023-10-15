@@ -1,32 +1,14 @@
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 
 use crate::cell::Value;
-
-
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Token(u64);
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeId(u32);
-
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum Node {
-    Leaf{leaf: Token, value: Value},
-    OpBin{op: Token, lhs: NodeId, rhs: NodeId},
-    OpUni{op: Token, rhs: NodeId},
-}
-
-
-use Node::*;
-
-struct Formula {
-    bytes: String,
-    tokens: Vec<Token>,
-    nodes: Vec<Node>,
-}
 
 trait EvalContext {
   fn get_ast(&self, node: &NodeId) -> &Node;
@@ -60,8 +42,16 @@ impl EvalContext for EvalState {
   }
 }
 
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+enum Node {
+    Leaf{leaf: Token, value: Value},
+    OpBin{op: Token, lhs: NodeId, rhs: NodeId},
+    OpUni{op: Token, rhs: NodeId},
+}
+use Node::*;
+
 impl Node {
-  pub fn eval(&self, ctx: &impl EvalContext) -> Value {
+  fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
       Leaf{leaf, value} => value.to_owned(),
       OpBin{op, lhs, rhs} => {
@@ -84,12 +74,202 @@ impl Node {
   }
 }
 
+struct Parser {
+  tokens: Vec<Token>,
+  nodes: Vec<Node>,
+
+  bytes: Vec<char>,
+  pos: usize,
+}
+
+impl Parser {
+  fn new<S: Into<String>>(input: S) -> Parser {
+    Parser { 
+      tokens: vec![], 
+      nodes: vec![], 
+      bytes: input.into().chars().collect(), 
+      pos: 0,
+    }
+  }
+}
+
+impl ParserOps<char> for Parser {
+  fn get_pos(&self) -> usize {
+      self.pos
+  }
+  fn set_pos(&mut self, p: usize) {
+      self.pos = p;
+  }
+  fn next(&mut self) -> Option<char> {
+    let item = self.bytes.get(self.pos)?;
+    self.pos += 1;
+    Some(*item)
+  }
+
+  fn like(&mut self, needle: char) -> Option<char> {
+    let mut item = self.next()?;
+    while item == ' ' || item == '\n' || item == '\t' {
+      item = self.next()?;
+    }
+    if item == needle { 
+      Some(needle) 
+    } else {
+      None
+    }
+  }
+  fn exact(&mut self, needle: char) -> Option<char> {
+    let item = self.next()?;
+    if item == needle { 
+      Some(needle) 
+    } else {
+      None
+    }
+  }
+} 
+
+trait ParserOps<T> {
+  fn get_pos(&self) -> usize;
+  fn set_pos(&mut self, p: usize);
+  fn next(&mut self) -> Option<T>;
+  fn like(&mut self, needle: char) -> Option<T>;
+  fn exact(&mut self, needle: char) -> Option<T>;
+
+  fn r_one(&mut self) -> Option<T> {
+    self.like('1')
+  }
+  fn r_plus(&mut self) -> Option<T> {
+    self.like('+')
+  }
+  fn r_minus(&mut self) -> Option<T> {
+    self.like('-')
+  }
+  fn r_mult(&mut self) -> Option<T> {
+    self.like('*')
+  }
+  fn r_div(&mut self) -> Option<T> {
+    self.like('/')
+  }
+  fn r_lpar(&mut self) -> Option<T> {
+    self.like('(')
+  }
+  fn r_rpar(&mut self) -> Option<T> {
+    self.like(')')
+  }
+
+  fn r_term1(&mut self) -> Option<T> {
+    self.r_one()
+  }
+
+  fn r_term2(&mut self) -> Option<T> {
+    self.r_lpar()?;
+    let expr = self.r_expr()?;
+    self.r_rpar()?;
+    Some(expr)
+  }
+
+  fn r_term(&mut self) -> Option<T> {
+    let pos = self.get_pos();
+
+    for expr in [
+      |s: &mut Self|{s.r_term1()},
+      |s: &mut Self|{s.r_term2()},
+    ] {
+      match expr(self) {
+        Some(e) => return Some(e),
+        None => self.set_pos(pos),
+      };
+    }
+
+    None
+  }
+
+  fn r_binop(&mut self) -> Option<T> {
+    let pos = self.get_pos();
+
+    for expr in [
+      |s: &mut Self|{s.r_plus()},
+      |s: &mut Self|{s.r_minus()},
+      |s: &mut Self|{s.r_mult()},
+      |s: &mut Self|{s.r_div()},
+    ] {
+      match expr(self) {
+        Some(e) => return Some(e),
+        None => self.set_pos(pos),
+      };
+    }
+
+    None
+  }
+
+  fn r_expr1(&mut self) -> Option<T> {
+    self.r_term()?;
+    let op = self.r_binop()?;
+    self.r_expr()?;
+    Some(op)
+  }
+
+  fn r_expr2(&mut self) -> Option<T> {
+    self.r_term()
+  }
+
+  fn r_expr(&mut self) -> Option<T>  {
+    let pos = self.get_pos();
+
+    for expr in [
+      |s: &mut Self|{s.r_expr1()},
+      |s: &mut Self|{s.r_expr2()},
+    ] {
+      match expr(self) {
+        Some(e) => return Some(e),
+        None => self.set_pos(pos),
+      };
+    }
+    None
+
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
 
   #[test]
   fn test_parser_basics() {
+    let mut p = Parser::new("hi");
+
+    assert_eq!(p.next(), Some('h'));
+    assert_eq!(p.next(), Some('i'));
+    assert_eq!(p.next(), None);
+    assert_eq!(p.next(), None);
+
+    p = Parser::new("1  ");
+    assert_eq!(p.r_expr(), Some('1'));
+
+    p = Parser::new("1+1");
+    assert_eq!(p.r_expr(), Some('+'));
+
+    p = Parser::new("1-1");
+    assert_eq!(p.r_expr(), Some('-'));
+
+    p = Parser::new("1/1");
+    assert_eq!(p.r_expr(), Some('/'));
+
+    p = Parser::new("1-1");
+    assert_eq!(p.r_expr(), Some('-'));
+
+    p = Parser::new("(1)");
+    assert_eq!(p.r_expr(), Some('1'));
+
+    p = Parser::new("(1 +(1+ 1+1)+ 1)");
+    assert_eq!(p.r_expr(), Some('+'));
+
+    p = Parser::new("1 +1");
+    assert_eq!(p.exact('1'), Some('1'));
+    assert_eq!(p.exact('1'), None);
+  }
+
+  #[test]
+  fn test_eval_basics() {
     use Node::*;
     use Value::*;
 
