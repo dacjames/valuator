@@ -7,17 +7,19 @@ use crate::cell::Value;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Token {
   pos: u32,
-  len: u32,
+  len: u16,
+  tag: u16,
 }
 
 impl Token {
-  fn new(orig: usize, curr: usize) -> Token {
+  fn new(tag: u16, orig: usize, curr: usize) -> Token {
     if curr < orig {
       panic!("Negative token length!")
     }
     Token { 
       pos: orig as u32, 
-      len: (curr - orig) as u32,
+      len: (curr - orig) as u16,
+      tag: tag,
     }
   }
 }
@@ -93,6 +95,8 @@ impl Node {
   }
 }
 
+type Rule = fn(&mut Parser) -> Option<char>;
+
 struct Parser {
   tokens: Vec<Token>,
   nodes: Vec<Node>,
@@ -113,20 +117,27 @@ impl Parser {
   fn get_pos(&self) -> usize {
       self.pos
   }
+
   fn set_pos(&mut self, p: usize) {
       self.pos = p;
   }
+
   fn next(&mut self) -> Option<char> {
     let item = self.bytes.get(self.pos)?;
     self.pos += 1;
     Some(*item)
   }
 
-  fn like_char(&mut self, needle: char) -> Option<char> {
+  fn next_nonws(&mut self) -> Option<char> {
     let mut item = self.next()?;
-    while item == ' ' || item == '\n' || item == '\t' {
+    while item.is_whitespace() {
       item = self.next()?;
     }
+    Some(item)
+  }
+
+  fn like_char(&mut self, needle: char) -> Option<char> {
+    let item = self.next_nonws()?;
     if item == needle { 
       Some(needle) 
     } else {
@@ -153,16 +164,75 @@ impl Parser {
     }
   }
 
+  fn select<const N: usize>(&mut self, rules: [Rule; N]) -> Option<char> {
+    let pos = self.get_pos();
+
+    for rule in rules {
+      match rule(self) {
+        Some(e) => return Some(e),
+        None => self.set_pos(pos),
+      };
+    }
+    None
+  }
+
+  fn char_class(&mut self, chars: &str) -> Option<char> {
+    let item = self.next_nonws()?;
+    if chars.contains(item) {
+      Some(item)
+    } else {
+      None
+    }
+  }
+
+  fn maybe(&mut self, rule: Rule) -> Option<char> {
+    let pos = self.get_pos();
+    match rule(self) {
+      Some(ch) => Some(ch),
+      None => {
+        self.set_pos(pos);
+        Some('\0')
+      },
+    }
+  }
+
+  fn one_or_more(&mut self, rule: Rule) -> Option<char> {
+    let res = rule(self)?;
+    self.zero_or_more(rule)?;
+    Some(res)
+  }
+
+  fn zero_or_more(&mut self, rule: Rule) -> Option<char> {
+    let mut pos = self.get_pos();
+    let mut res = rule(self);
+    let mut last: Option<char> = Some('\0');
+
+    while res.is_some() {
+      pos = self.get_pos();
+      last = res;
+      res = rule(self);
+    }
+
+    // rollback the None match at the end of the sequence
+    self.set_pos(pos);
+    last
+  }
+
   fn r_one(&mut self) -> Option<char> {
-    self.like_char('1')
+    self.maybe(|s|{s.like_char('e')})?;
+    self.one_or_more(|s|{s.char_class("1")})
   }
 
   fn r_ten(&mut self) -> Option<char> {
     self.like_str("10")
   }
 
+  fn r_num(&mut self) -> Option<char> {
+    self.one_or_more(|s|{s.char_class("0123456789")})
+  }
+
   fn r_plus(&mut self) -> Option<char> {
-    self.like_str("+")
+    self.like_char('+')
   }
   fn r_minus(&mut self) -> Option<char> {
     self.like_char('-')
@@ -185,7 +255,10 @@ impl Parser {
   }
 
   fn r_term2(&mut self) -> Option<char> {
-    self.r_one()
+    self.select([
+      |s|{s.r_one()},
+      |s|{s.r_num()},
+    ])
   }
 
   fn r_term3(&mut self) -> Option<char> {
@@ -196,38 +269,20 @@ impl Parser {
   }
 
   fn r_term(&mut self) -> Option<char> {
-    let pos = self.get_pos();
-
-    for expr in [
-      |s: &mut Self|{s.r_term1()},
-      |s: &mut Self|{s.r_term2()},
-      |s: &mut Self|{s.r_term3()},
-    ] {
-      match expr(self) {
-        Some(e) => return Some(e),
-        None => self.set_pos(pos),
-      };
-    }
-
-    None
+    self.select([
+      |s|{s.r_term1()},
+      |s|{s.r_term2()},
+      |s|{s.r_term3()},
+    ])
   }
 
   fn r_binop(&mut self) -> Option<char> {
-    let pos = self.get_pos();
-
-    for expr in [
-      |s: &mut Self|{s.r_plus()},
-      |s: &mut Self|{s.r_minus()},
-      |s: &mut Self|{s.r_mult()},
-      |s: &mut Self|{s.r_div()},
-    ] {
-      match expr(self) {
-        Some(e) => return Some(e),
-        None => self.set_pos(pos),
-      };
-    }
-
-    None
+    self.select([
+      |s|{s.r_plus()},
+      |s|{s.r_minus()},
+      |s|{s.r_mult()},
+      |s|{s.r_div()},
+    ])
   }
 
   fn r_expr1(&mut self) -> Option<char> {
@@ -242,19 +297,10 @@ impl Parser {
   }
 
   fn r_expr(&mut self) -> Option<char>  {
-    let pos = self.get_pos();
-
-    for expr in [
+    self.select([
       |s: &mut Self|{s.r_expr1()},
       |s: &mut Self|{s.r_expr2()},
-    ] {
-      match expr(self) {
-        Some(e) => return Some(e),
-        None => self.set_pos(pos),
-      };
-    }
-    None
-
+    ])
   }
 }
 
@@ -274,8 +320,20 @@ mod tests {
     p = Parser::new("1  ");
     assert_eq!(p.r_expr(), Some('1'));
 
+    p = Parser::new("e1");
+    assert_eq!(p.r_expr(), Some('1'));
+
+    p = Parser::new("111111");
+    assert_eq!(p.r_expr(), Some('1'));
+
     p = Parser::new("10");
     assert_eq!(p.r_expr(), Some('0'));
+
+    p = Parser::new("999");
+    assert_eq!(p.r_expr(), Some('9'));
+
+    p = Parser::new("399+84729");
+    assert_eq!(p.r_expr(), Some('+'));
 
     p = Parser::new("1+1");
     assert_eq!(p.r_expr(), Some('+'));
@@ -292,7 +350,7 @@ mod tests {
     p = Parser::new("(1)");
     assert_eq!(p.r_expr(), Some('1'));
 
-    p = Parser::new("(1 +(1+ 1+1)+ 1)");
+    p = Parser::new("(1+(1 +1 +1) +1)");
     assert_eq!(p.r_expr(), Some('+'));
 
     p = Parser::new("1 +1");
@@ -311,13 +369,13 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{leaf: Token::new(0,0), value: N(dec(1, 0))},
-      Leaf{leaf: Token::new(0,0), value: N(dec(2, 0))},
-      Leaf{leaf: Token::new(0,0), value: I(2)},
-      Leaf{leaf: Token::new(0,0), value: F(2.0)},
-      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(1)},
-      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(2)},
-      OpBin{op: Token::new(0,0), lhs: NodeId(0), rhs: NodeId(3)},
+      Leaf{leaf: Token::new(0,0,0), value: N(dec(1, 0))},
+      Leaf{leaf: Token::new(0,0,0), value: N(dec(2, 0))},
+      Leaf{leaf: Token::new(0,0,0), value: I(2)},
+      Leaf{leaf: Token::new(0,0,0), value: F(2.0)},
+      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(1)},
+      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(2)},
+      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);    
