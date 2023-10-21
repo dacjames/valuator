@@ -1,8 +1,9 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 
 use crate::cell::Value;
+use scopeguard::defer;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Token {
@@ -24,6 +25,20 @@ impl Token {
   }
 }
 
+trait TokenSaver {
+  fn save_token(&mut self, tok: Token);
+} 
+
+struct TokenContext {
+  token: Token,
+  saver: dyn TokenSaver
+}
+
+impl Drop for TokenContext {
+  fn drop(&mut self) {
+    self.saver.save_token(self.token);
+  }
+}
 
 // struct Token(u64);
 
@@ -105,6 +120,12 @@ struct Parser {
   pos: usize,
 }
 
+impl TokenSaver for Parser {
+  fn save_token(&mut self, tok: Token) { 
+      self.tokens.push(tok);
+  }
+}
+
 impl Parser {
   fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
@@ -122,11 +143,17 @@ impl Parser {
       self.pos = p;
   }
 
+
   fn next(&mut self) -> Option<char> {
     let item = self.bytes.get(self.pos)?;
     self.pos += 1;
     Some(*item)
   }
+
+  // fn start(&mut self, tag: u16) -> TokenContext {
+  //   let tok = Token::new(tag, self.pos, self.pos);
+  //   TokenContext { token: tok, saver: self as (&mut TokenSaver) }
+  // }
 
   fn next_nonws(&mut self) -> Option<char> {
     let mut item = self.next()?;
@@ -134,6 +161,24 @@ impl Parser {
       item = self.next()?;
     }
     Some(item)
+  }
+
+  fn whitespace(&mut self) -> Option<char> {
+    fn is_some_whitespace(item: Option<char>) -> bool {
+      item.is_some() && item.unwrap().is_whitespace()
+    }
+    let mut item = self.next();
+    let first = item;
+    let mut matched = false;
+    while is_some_whitespace(item) {
+      matched = true;
+      item = self.next();
+    }
+    if matched {
+      self.pos -= 1;
+      return first;
+    }
+    None
   }
 
   fn like_char(&mut self, needle: char) -> Option<char> {
@@ -230,7 +275,6 @@ impl Parser {
   fn r_num(&mut self) -> Option<char> {
     self.one_or_more(|s|{s.char_class("0123456789")})
   }
-
   fn r_plus(&mut self) -> Option<char> {
     self.like_char('+')
   }
@@ -319,6 +363,13 @@ mod tests {
 
     p = Parser::new("1  ");
     assert_eq!(p.r_expr(), Some('1'));
+
+
+    p = Parser::new("    x     y");
+    assert_eq!(p.whitespace(), Some(' '));
+    assert_eq!(p.next(), Some('x'));
+    assert_eq!(p.whitespace(), Some(' '));
+    assert_eq!(p.whitespace(), None);
 
     p = Parser::new("e1");
     assert_eq!(p.r_expr(), Some('1'));
