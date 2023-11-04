@@ -19,6 +19,7 @@ use tauri::State;
 use board::Board;
 use cell::Cell;
 use rpc::CellUi;
+use parser::Parser;
 
 
 #[derive(Default)]
@@ -44,6 +45,9 @@ fn tile(state: State<BoardState>) -> TileUi {
 fn board(state: State<BoardState>) -> board::BoardUi {
   let board = state.board.read().unwrap();
   // let board = Board::<f64>::default();
+
+  let mut parser = Parser::new("dummy");
+  let _silly = parser.parse();
 
   board.render()
 }

@@ -121,7 +121,7 @@ impl TokCtx {
 }
 
 
-struct Parser {
+pub struct Parser {
   tokens: Vec<Token>,
   // nodes: Vec<Node>,
 
@@ -130,7 +130,7 @@ struct Parser {
 }
 
 impl Parser {
-  fn new<S: Into<String>>(input: S) -> Parser {
+  pub fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
       tokens: vec![], 
       // nodes: vec![], 
@@ -213,19 +213,6 @@ impl Parser {
     self.tok(TokTag::WSTok, |s|{s.match_ws()})
   }
 
-  // fn not(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
-  //   let len = self.tokens.len();
-  //   let pos = self.pos;
-  //   match rule(self) {
-  //     Some(_) => {
-  //       // rollback the match
-  //       self.tokens.truncate(len);
-  //       self.set_pos(pos);
-  //       None
-  //     }
-  //   }
-  // }
-
   fn like_char(&mut self, needle: char) -> Option<char> {
     let item = self.next_nonws()?;
     if item == needle { 
@@ -271,6 +258,7 @@ impl Parser {
       match rule(self) {
         Some(e) => return Some(e),
         None => {
+          // TODO Rollback method
           self.tokens.truncate(ntoks);
           self.set_pos(pos)
         }
@@ -425,6 +413,10 @@ impl Parser {
       |s|{s.r_expr1()},
       |s: &mut Parser|{s.r_expr2()},
     ])
+  }
+
+  pub fn parse(&mut self) -> Option<char> {
+    self.r_expr()
   }
 }
 
