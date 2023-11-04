@@ -3,45 +3,31 @@ use std::collections::HashMap;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 
 use crate::cell::Value;
-use scopeguard::defer;
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u16)]
+enum TokTag {
+  NumTok,
+  OpTok,
+  SymTok,
+}
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Token {
   pos: u32,
   len: u16,
-  tag: u16,
+  tag: TokTag,
 }
 
 impl Token {
-  fn new(tag: u16, orig: usize, curr: usize) -> Token {
-    if curr < orig {
-      panic!("Negative token length!")
-    }
-    Token { 
-      pos: orig as u32, 
-      len: (curr - orig) as u16,
+  fn new(tag: TokTag, pos: u32) -> Token {
+    Token{
+      pos: pos,
+      len: 0,
       tag: tag,
     }
   }
 }
-
-trait TokenSaver {
-  fn save_token(&mut self, tok: Token);
-} 
-
-struct TokenContext {
-  token: Token,
-  saver: dyn TokenSaver
-}
-
-impl Drop for TokenContext {
-  fn drop(&mut self) {
-    self.saver.save_token(self.token);
-  }
-}
-
-// struct Token(u64);
-
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeId(u32);
@@ -120,12 +106,6 @@ struct Parser {
   pos: usize,
 }
 
-impl TokenSaver for Parser {
-  fn save_token(&mut self, tok: Token) { 
-      self.tokens.push(tok);
-  }
-}
-
 impl Parser {
   fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
@@ -135,6 +115,7 @@ impl Parser {
       pos: 0,
     }
   }
+
   fn get_pos(&self) -> usize {
       self.pos
   }
@@ -143,17 +124,11 @@ impl Parser {
       self.pos = p;
   }
 
-
   fn next(&mut self) -> Option<char> {
     let item = self.bytes.get(self.pos)?;
     self.pos += 1;
     Some(*item)
   }
-
-  // fn start(&mut self, tag: u16) -> TokenContext {
-  //   let tok = Token::new(tag, self.pos, self.pos);
-  //   TokenContext { token: tok, saver: self as (&mut TokenSaver) }
-  // }
 
   fn next_nonws(&mut self) -> Option<char> {
     let mut item = self.next()?;
@@ -413,6 +388,7 @@ mod tests {
   fn test_eval_basics() {
     use Node::*;
     use Value::*;
+    use TokTag::*;
 
     fn dec(num: i64, scale: u32) -> Decimal {
       Decimal::new(num, scale)
@@ -420,13 +396,13 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{leaf: Token::new(0,0,0), value: N(dec(1, 0))},
-      Leaf{leaf: Token::new(0,0,0), value: N(dec(2, 0))},
-      Leaf{leaf: Token::new(0,0,0), value: I(2)},
-      Leaf{leaf: Token::new(0,0,0), value: F(2.0)},
-      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(1)},
-      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(2)},
-      OpBin{op: Token::new(0,0,0), lhs: NodeId(0), rhs: NodeId(3)},
+      Leaf{leaf: Token::new(NumTok,0), value: N(dec(1, 0))},
+      Leaf{leaf: Token::new(NumTok,0), value: N(dec(2, 0))},
+      Leaf{leaf: Token::new(NumTok,0), value: I(2)},
+      Leaf{leaf: Token::new(NumTok,0), value: F(2.0)},
+      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(1)},
+      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(2)},
+      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);    
