@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, cell::RefCell};
+use std::rc::Rc;
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 
@@ -10,6 +11,8 @@ enum TokTag {
   NumTok,
   OpTok,
   SymTok,
+  WSTok,
+  StringTok
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,12 +23,15 @@ struct Token {
 }
 
 impl Token {
-  fn new(tag: TokTag, pos: u32) -> Token {
+  fn new(tag: TokTag, pos: u32, len: u16) -> Token {
     Token{
       pos: pos,
-      len: 0,
+      len: len,
       tag: tag,
     }
+  }
+  fn empty(tag: TokTag, pos: u32) -> Token {
+    Token::new(tag, pos, 0)
   }
 }
 
@@ -97,10 +103,27 @@ impl Node {
 }
 
 type Rule = fn(&mut Parser) -> Option<char>;
+// type Rule = impl Fn(&mut Parser) -> Option<char>;
+
+
+struct TokCtx{tok: Token}
+
+impl TokCtx {
+  fn end(&self, pos: u32) -> Token {
+    let mut tok = self.tok;
+    if pos < self.tok.pos {
+      let this = self.tok.pos;
+      panic!("invalid end {pos} < {this}")
+    }
+    tok.len = (pos - self.tok.pos) as u16;
+    return tok
+  }
+}
+
 
 struct Parser {
   tokens: Vec<Token>,
-  nodes: Vec<Node>,
+  // nodes: Vec<Node>,
 
   bytes: Vec<char>,
   pos: usize,
@@ -110,14 +133,44 @@ impl Parser {
   fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
       tokens: vec![], 
-      nodes: vec![], 
+      // nodes: vec![], 
       bytes: input.into().chars().collect(), 
       pos: 0,
     }
   }
 
+  fn tok_ctx(&self, tag: TokTag) -> TokCtx {
+    TokCtx{
+      tok: Token::empty(tag, self.pos as u32),
+    }
+  }
+
+  fn tok(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+    let tokctx = self.tok_ctx(tag);
+    let res = rule(self);
+    match res {
+      Some(_) => {
+
+        self.tokens.push(tokctx.end(self.pos as u32));
+        res
+      }
+      None => res,
+    }
+  } 
+
   fn get_pos(&self) -> usize {
       self.pos
+  }
+
+  fn tok_value(&self, tok: Token) -> String {
+    let p = tok.pos as usize;
+    let len = tok.len as usize;
+    let val: String = self.bytes[p..p+len].iter().collect();
+    val
+  }
+
+  fn tok_values(&self) -> Vec<String> {
+    self.tokens.iter().map(|t|{ self.tok_value(*t) }).collect()
   }
 
   fn set_pos(&mut self, p: usize) {
@@ -138,7 +191,7 @@ impl Parser {
     Some(item)
   }
 
-  fn whitespace(&mut self) -> Option<char> {
+  fn match_ws(&mut self) -> Option<char> {
     fn is_some_whitespace(item: Option<char>) -> bool {
       item.is_some() && item.unwrap().is_whitespace()
     }
@@ -156,9 +209,35 @@ impl Parser {
     None
   }
 
+  fn whitespace(&mut self) -> Option<char> {
+    self.tok(TokTag::WSTok, |s|{s.match_ws()})
+  }
+
+  // fn not(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+  //   let len = self.tokens.len();
+  //   let pos = self.pos;
+  //   match rule(self) {
+  //     Some(_) => {
+  //       // rollback the match
+  //       self.tokens.truncate(len);
+  //       self.set_pos(pos);
+  //       None
+  //     }
+  //   }
+  // }
+
   fn like_char(&mut self, needle: char) -> Option<char> {
     let item = self.next_nonws()?;
     if item == needle { 
+      Some(needle) 
+    } else {
+      None
+    }
+  }
+
+  fn not_char(&mut self, needle: char) -> Option<char> {
+    let item = self.next_nonws()?;
+    if item != needle { 
       Some(needle) 
     } else {
       None
@@ -186,11 +265,15 @@ impl Parser {
 
   fn select<const N: usize>(&mut self, rules: [Rule; N]) -> Option<char> {
     let pos = self.get_pos();
+    let ntoks = self.tokens.len();
 
     for rule in rules {
       match rule(self) {
         Some(e) => return Some(e),
-        None => self.set_pos(pos),
+        None => {
+          self.tokens.truncate(ntoks);
+          self.set_pos(pos)
+        }
       };
     }
     None
@@ -205,7 +288,16 @@ impl Parser {
     }
   }
 
-  fn maybe(&mut self, rule: Rule) -> Option<char> {
+  fn not_class(&mut self, chars: &str) -> Option<char> {
+    let item = self.next_nonws()?;
+    if !chars.contains(item) {
+      Some(item)
+    } else {
+      None
+    }
+  }
+
+  fn maybe(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
     let pos = self.get_pos();
     match rule(self) {
       Some(ch) => Some(ch),
@@ -216,13 +308,13 @@ impl Parser {
     }
   }
 
-  fn one_or_more(&mut self, rule: Rule) -> Option<char> {
+  fn one_or_more(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
     let res = rule(self)?;
     self.zero_or_more(rule)?;
     Some(res)
   }
 
-  fn zero_or_more(&mut self, rule: Rule) -> Option<char> {
+  fn zero_or_more(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
     let mut pos = self.get_pos();
     let mut res = rule(self);
     let mut last: Option<char> = Some('\0');
@@ -238,18 +330,29 @@ impl Parser {
     last
   }
 
-  fn r_one(&mut self) -> Option<char> {
-    self.maybe(|s|{s.like_char('e')})?;
-    self.one_or_more(|s|{s.char_class("1")})
-  }
-
-  fn r_ten(&mut self) -> Option<char> {
-    self.like_str("10")
-  }
-
   fn r_num(&mut self) -> Option<char> {
-    self.one_or_more(|s|{s.char_class("0123456789")})
+    self.tok(TokTag::NumTok, |s| { 
+      s.maybe(|s|{s.like_char('e')})?;
+      s.one_or_more(|s|{s.char_class("0123456789")})
+    })
   }
+
+  fn match_string(&mut self, bookend: char) -> Option<char> {
+    self.like_char(bookend)?;
+    self.zero_or_more(move |s|{s.not_char(bookend)})?;
+    self.like_char(bookend)?;
+    Some(bookend)
+  }
+
+  fn r_string(&mut self) -> Option<char> {
+    self.tok(TokTag::StringTok, |s| {
+      s.select([
+        |s|{s.match_string('\'')},
+        |s|{s.match_string('"')},
+      ])
+    }) 
+  }
+
   fn r_plus(&mut self) -> Option<char> {
     self.like_char('+')
   }
@@ -270,14 +373,14 @@ impl Parser {
   }
 
   fn r_term1(&mut self) -> Option<char> {
-    self.r_ten()
+    self.select([
+      |s|{s.r_num()},
+      |s|{s.r_string()},
+    ])
   }
 
   fn r_term2(&mut self) -> Option<char> {
-    self.select([
-      |s|{s.r_one()},
-      |s|{s.r_num()},
-    ])
+    None
   }
 
   fn r_term3(&mut self) -> Option<char> {
@@ -296,12 +399,14 @@ impl Parser {
   }
 
   fn r_binop(&mut self) -> Option<char> {
-    self.select([
-      |s|{s.r_plus()},
-      |s|{s.r_minus()},
-      |s|{s.r_mult()},
-      |s|{s.r_div()},
-    ])
+    self.tok(TokTag::OpTok, |s|{
+      s.select([
+        |s|{s.r_plus()},
+        |s|{s.r_minus()},
+        |s|{s.r_mult()},
+        |s|{s.r_div()},
+      ])
+    })
   }
 
   fn r_expr1(&mut self) -> Option<char> {
@@ -317,15 +422,20 @@ impl Parser {
 
   fn r_expr(&mut self) -> Option<char>  {
     self.select([
-      |s: &mut Self|{s.r_expr1()},
-      |s: &mut Self|{s.r_expr2()},
+      |s|{s.r_expr1()},
+      |s: &mut Parser|{s.r_expr2()},
     ])
   }
 }
 
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  macro_rules! vec_strings {
+    ($($x:expr),*) => (vec![$($x.to_string()),*]);
+  }
 
   #[test]
   fn test_parser_basics() {
@@ -353,7 +463,7 @@ mod tests {
     assert_eq!(p.r_expr(), Some('1'));
 
     p = Parser::new("10");
-    assert_eq!(p.r_expr(), Some('0'));
+    assert_eq!(p.r_expr(), Some('1'));
 
     p = Parser::new("999");
     assert_eq!(p.r_expr(), Some('9'));
@@ -382,7 +492,32 @@ mod tests {
     p = Parser::new("1 +1");
     assert_eq!(p.exact('1'), Some('1'));
     assert_eq!(p.exact('1'), None);
+
   }
+
+  #[test]
+  fn test_parser_tokens() {
+    // let mut p = Parser::new("999");
+    let mut p = Parser::new("789+234");
+    assert_eq!(p.r_expr(), Some('+'));
+    assert_eq!(p.tokens.len(), 3);
+    assert_eq!(p.tok_values(), vec_strings!["789","+","234"]);
+  }
+
+  #[test]
+  fn test_parser_strings() {
+    // let mut p = Parser::new("999");
+    let mut p = Parser::new("'asdf'");
+    assert_eq!(p.r_expr(), Some('\''));
+    assert_eq!(p.tokens.len(), 1);
+    assert_eq!(p.tok_values(), vec_strings!["'asdf'"]);
+
+    let mut p = Parser::new("\"qwerty\"");
+    assert_eq!(p.r_expr(), Some('\"'));
+    assert_eq!(p.tokens.len(), 1);
+    assert_eq!(p.tok_values(), vec_strings!["\"qwerty\""]);
+  }
+  
 
   #[test]
   fn test_eval_basics() {
@@ -396,13 +531,13 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{leaf: Token::new(NumTok,0), value: N(dec(1, 0))},
-      Leaf{leaf: Token::new(NumTok,0), value: N(dec(2, 0))},
-      Leaf{leaf: Token::new(NumTok,0), value: I(2)},
-      Leaf{leaf: Token::new(NumTok,0), value: F(2.0)},
-      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(1)},
-      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(2)},
-      OpBin{op: Token::new(NumTok,0), lhs: NodeId(0), rhs: NodeId(3)},
+      Leaf{leaf: Token::empty(NumTok,0), value: N(dec(1, 0))},
+      Leaf{leaf: Token::empty(NumTok,0), value: N(dec(2, 0))},
+      Leaf{leaf: Token::empty(NumTok,0), value: I(2)},
+      Leaf{leaf: Token::empty(NumTok,0), value: F(2.0)},
+      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(1)},
+      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(2)},
+      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);    
