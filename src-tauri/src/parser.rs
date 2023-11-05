@@ -41,6 +41,8 @@ impl Token {
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeId(u32);
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ValueId(u32);
 
 impl Default for NodeId {
   fn default() -> Self {
@@ -49,17 +51,20 @@ impl Default for NodeId {
 }
 
 pub trait EvalContext {
+  fn get_value(&self, node: &ValueId) -> &Value;
   fn get_ast(&self, node: &NodeId) -> &Node;
 }
 
 struct EvalState {
-  nodes: HashMap<NodeId, Node>
+  nodes: HashMap<NodeId, Node>,
+  values: HashMap<ValueId, Value>,
 }
 
 impl EvalState {
   fn new() -> EvalState {
     EvalState{
       nodes: HashMap::new(),
+      values: HashMap::new(),
     }
   }
 
@@ -72,26 +77,38 @@ impl EvalState {
       self.insert(NodeId(i as u32), ast.to_owned())
     }
   }
+
+  fn push_value(&mut self, value: Value) -> ValueId{
+    let id = ValueId(self.values.len() as u32);
+    self.values.insert(id, value);
+    id
+  }
 }
 
 impl EvalContext for EvalState {
+  fn get_value(&self, value: &ValueId) -> &Value {
+    self.values.get(value).unwrap()
+  }
   fn get_ast(&self, node: &NodeId) -> &Node {
     self.nodes.get(node).unwrap()
   }
 }
 
 impl EvalContext for Parser {
+  fn get_value(&self, node: &ValueId) -> &Value {
+    &self.values[node.0 as usize]
+  }
   fn get_ast(&self, node: &NodeId) -> &Node {
     &self.nodes[node.0 as usize]
   }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Node {
   Zero{},
   Nil{ch: char},
   Symbol{tok: Token},
-  Leaf{tok: Token, value: Value},
+  Leaf{tok: Token, value: ValueId},
   BinOp{op: char, lhs: NodeId, rhs: NodeId},
   UniOp{op: char, rhs: NodeId},
   Index{row: NodeId, col: NodeId},
@@ -101,14 +118,14 @@ use Node::*;
 
 impl Default for Node {
   fn default() -> Self {
-    Nil { ch: char::default() }
+    Zero { }
   }
 }
 
 impl Node {
   pub fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
-      Leaf{tok: leaf, value} => value.to_owned(),
+      Leaf{tok: leaf, value} => ctx.get_value(value).to_owned(),
       BinOp{op, lhs, rhs} => {
         let left = ctx.get_ast(lhs).eval(ctx);
         let right = ctx.get_ast(rhs).eval(ctx);
@@ -155,10 +172,18 @@ impl TokCtx {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ParseState {
+  pos: usize,
+  len_toks: usize,
+  len_nodes: usize,
+}
+
 
 pub struct Parser {
   tokens: Vec<Token>,
   nodes: Vec<Node>,
+  values: Vec<Value>,
 
   buf: Vec<char>,
   pos: usize,
@@ -168,7 +193,8 @@ impl Parser {
   pub fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
       tokens: vec![], 
-      nodes: vec![Zero{}], 
+      nodes: vec![Node::default()], 
+      values: vec![Value::default()],
       buf: input.into().chars().collect(), 
       pos: 0,
     }
@@ -194,6 +220,12 @@ impl Parser {
     let id = self.nodes.len() as u32;
     self.nodes.push(node);
     NodeId(id)
+  }
+
+  fn push_value(&mut self, value: Value) -> ValueId {
+    let id = self.values.len() as u32;
+    self.values.push(value);
+    ValueId(id)
   }
 
   fn yield_tok<T: Copy + Default>(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<Token> {
@@ -240,6 +272,27 @@ impl Parser {
     let item = self.buf.get(self.pos)?;
     self.pos += 1;
     Some(*item)
+  }
+
+
+  fn reset(&mut self) {
+    self.set_pos(0);
+    self.tokens.truncate(0);
+    self.nodes.truncate(1);
+  }
+
+  fn save(&mut self) -> ParseState {
+    ParseState{
+      pos: self.get_pos(),
+      len_toks: self.tokens.len(),
+      len_nodes: self.nodes.len(),
+    }
+  }
+
+  fn rollback(&mut self, state: ParseState) {
+    self.set_pos(state.pos);
+    self.tokens.truncate(state.len_toks);
+    self.nodes.truncate(state.len_nodes);
   }
 
   fn match_ws(&mut self) -> Option<char> {
@@ -324,28 +377,25 @@ impl Parser {
   }
 
   fn select<const N: usize, T: Clone + Default>(&mut self, rules: [Rule<T>; N]) -> Option<T> {
-    let pos = self.get_pos();
-    let ntoks = self.tokens.len();
+    let state = self.save();
 
     for rule in rules {
       match rule(self) {
         Some(e) => return Some(e),
-        None => {
-          // TODO Rollback method
-          self.tokens.truncate(ntoks);
-          self.set_pos(pos)
-        }
+        None => self.rollback(state),
       };
     }
     None
   }
 
   fn maybe<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
-    let pos = self.get_pos();
+    let state = self.save();
     match rule(self) {
       Some(ch) => Some(ch),
       None => {
-        self.set_pos(pos);
+        // TODO keep an eye on maybe performance
+        // currently more efficient to waste node/token memory than to rollback.
+        self.set_pos(state.pos);
         Some(T::default())
       },
     }
@@ -358,27 +408,31 @@ impl Parser {
   }
 
   fn zero_or_more<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
-    let mut pos = self.get_pos();
+    let mut state = self.save();
     let mut res = rule(self);
     let mut last: Option<T> = Some(T::default());
 
     while res.is_some() {
-      pos = self.get_pos();
+      state = self.save();
       last = res;
       res = rule(self);
     }
 
     // rollback the None match at the end of the sequence
-    self.set_pos(pos);
+    self.rollback(state);
     last
   }
 
   fn r_num(&mut self) -> Option<Node> {
+
     self.yield_tok(TokTag::NumTok, |s| {
-      s.one_or_more(|s|{s.char_class("0123456789")})
+      s.char_class("123456789")?;
+      s.zero_or_more(|s|s.char_class("0123456789"))?;
+      s.maybe(|s|s.char('.'))?;
+      s.zero_or_more(|s|s.char_class("0123456789"))
     }).and_then(|tok|{
       let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
-      Some(Node::Leaf { tok, value: Value::N(decval) })
+      Some(Node::Leaf { tok, value: self.push_value(Value::N(decval)) })
     })
   }
 
@@ -399,7 +453,7 @@ impl Parser {
       let pos = tok.pos as usize;
       let end = tok.len as usize + pos;
       let body: String = self.buf[pos+1..end-1].iter().collect();
-      Some(Leaf { tok: tok, value: Value::S(body) })
+      Some(Leaf{ tok: tok, value: self.push_value(Value::S(body)) })
     })
   }
 
@@ -548,8 +602,12 @@ impl Parser {
     }
   }
 
+  pub fn reparse(&mut self) -> Option<Node> {
+    self.reset();
+    self.r_expr()
+  }
+
   pub fn parse(&mut self) -> Option<Node> {
-    self.set_pos(0);
     self.r_expr()
   }
 }
@@ -680,10 +738,10 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{tok: Token::empty(NumTok,0), value: N(dec(1, 0))},
-      Leaf{tok: Token::empty(NumTok,0), value: N(dec(2, 0))},
-      Leaf{tok: Token::empty(NumTok,0), value: I(2)},
-      Leaf{tok: Token::empty(NumTok,0), value: F(2.0)},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(N(dec(1, 0)))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(N(dec(2, 0)))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(I(2))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(F(2.0))},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
