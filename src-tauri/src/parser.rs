@@ -14,13 +14,13 @@ enum TokTag {
   KWTok,
   WSTok,
   StringTok,
-  LPrnTok, RPrnTok,
+  LParTok, RParTok,
   LBckTok, RBckTok,
   LBrcTok, RBrcTok,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct Token {
+pub struct Token {
   pos: u32,
   len: u16,
   tag: TokTag,
@@ -40,7 +40,7 @@ impl Token {
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct NodeId(u32);
+pub struct NodeId(u32);
 
 trait EvalContext {
   fn get_ast(&self, node: &NodeId) -> &Node;
@@ -75,18 +75,26 @@ impl EvalContext for EvalState {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum Node {
-    Leaf{leaf: Token, value: Value},
-    OpBin{op: Token, lhs: NodeId, rhs: NodeId},
-    OpUni{op: Token, rhs: NodeId},
+pub enum Node {
+  Nil{ch: char},
+  Symbol{tok: Token},
+  Leaf{tok: Token, value: Value},
+  BinOp{op: char, lhs: NodeId, rhs: NodeId},
+  UniOp{op: char, rhs: NodeId},
 }
 use Node::*;
+
+impl Default for Node {
+  fn default() -> Self {
+    Nil { ch: char::default() }
+  }
+}
 
 impl Node {
   fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
-      Leaf{leaf, value} => value.to_owned(),
-      OpBin{op, lhs, rhs} => {
+      Leaf{tok: leaf, value} => value.to_owned(),
+      BinOp{op, lhs, rhs} => {
         let left = ctx.get_ast(lhs).eval(ctx);
         let right = ctx.get_ast(rhs).eval(ctx);
 
@@ -106,7 +114,7 @@ impl Node {
   }
 }
 
-type Rule = fn(&mut Parser) -> Option<char>;
+type Rule<T> = fn(&mut Parser) -> Option<T>;
 // type Rule = impl Fn(&mut Parser) -> Option<char>;
 
 
@@ -127,9 +135,9 @@ impl TokCtx {
 
 pub struct Parser {
   tokens: Vec<Token>,
-  // nodes: Vec<Node>,
+  nodes: Vec<Node>,
 
-  bytes: Vec<char>,
+  buf: Vec<char>,
   pos: usize,
 }
 
@@ -137,8 +145,8 @@ impl Parser {
   pub fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
       tokens: vec![], 
-      // nodes: vec![], 
-      bytes: input.into().chars().collect(), 
+      nodes: vec![], 
+      buf: input.into().chars().collect(), 
       pos: 0,
     }
   }
@@ -147,7 +155,7 @@ impl Parser {
     TokCtx{ tok: Token::empty(tag, self.pos as u32) }
   }
 
-  fn tok(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+  fn push_tok<T: Copy + Default>(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let tokctx = self.tok_ctx(tag);
     let res = rule(self);
     match res {
@@ -159,10 +167,29 @@ impl Parser {
     }
   } 
 
+  fn push_node(&mut self, node: Node) -> NodeId {
+    let id = self.nodes.len() as u32;
+    self.nodes.push(node);
+    NodeId(id)
+  }
+
+  fn yield_tok<T: Copy + Default>(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<Token> {
+    let tokctx = self.tok_ctx(tag);
+    let res = rule(self);
+    match res {
+      Some(_) => {
+        let tok = tokctx.end(self.pos as u32);
+        self.tokens.push(tok);
+        Some(tok)
+      }
+      None => None,
+    }
+  } 
+
   fn tok_value(&self, tok: Token) -> String {
     let p = tok.pos as usize;
     let len = tok.len as usize;
-    let val: String = self.bytes[p..p+len].iter().collect();
+    let val: String = self.buf[p..p+len].iter().collect();
     val
   }
 
@@ -174,12 +201,20 @@ impl Parser {
       self.pos
   }
 
+  fn peak_tok(&self) -> Token {
+    self.tokens[self.tokens.len()-1]
+  }
+
+  fn get_char(&self, tok: Token) -> char {
+    self.buf[tok.pos as usize]
+  }
+
   fn set_pos(&mut self, p: usize) {
       self.pos = p;
   }
 
   fn next(&mut self) -> Option<char> {
-    let item = self.bytes.get(self.pos)?;
+    let item = self.buf.get(self.pos)?;
     self.pos += 1;
     Some(*item)
   }
@@ -203,20 +238,12 @@ impl Parser {
   }
 
   fn ws(&mut self) -> Option<char> {
-    self.tok(TokTag::WSTok, |s|{s.match_ws()})
-  }
-
-  fn maybe_ws_old(&mut self) -> Option<char> {
-    self.maybe(|s|{s.ws()})
+    self.push_tok(TokTag::WSTok, |s|{s.match_ws()})
   }
 
   fn maybe_ws(&mut self) -> Option<char> {
-    self.tok(TokTag::WSTok, |s|{s.match_ws()}).or_else(||{
-      self.pos -= 1;
-      Some('\0')
-    })
+    self.maybe(|s|{s.ws()})
   }
-
 
   fn char(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
@@ -246,23 +273,6 @@ impl Parser {
     Some(res)
   }
 
-  fn select<const N: usize>(&mut self, rules: [Rule; N]) -> Option<char> {
-    let pos = self.get_pos();
-    let ntoks = self.tokens.len();
-
-    for rule in rules {
-      match rule(self) {
-        Some(e) => return Some(e),
-        None => {
-          // TODO Rollback method
-          self.tokens.truncate(ntoks);
-          self.set_pos(pos)
-        }
-      };
-    }
-    None
-  }
-
   fn char_class(&mut self, chars: &str) -> Option<char> {
     let item = self.next()?;
     if chars.contains(item) {
@@ -290,27 +300,44 @@ impl Parser {
     }
   }
 
-  fn maybe(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+  fn select<const N: usize, T: Clone + Default>(&mut self, rules: [Rule<T>; N]) -> Option<T> {
+    let pos = self.get_pos();
+    let ntoks = self.tokens.len();
+
+    for rule in rules {
+      match rule(self) {
+        Some(e) => return Some(e),
+        None => {
+          // TODO Rollback method
+          self.tokens.truncate(ntoks);
+          self.set_pos(pos)
+        }
+      };
+    }
+    None
+  }
+
+  fn maybe<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let pos = self.get_pos();
     match rule(self) {
       Some(ch) => Some(ch),
       None => {
         self.set_pos(pos);
-        Some('\0')
+        Some(T::default())
       },
     }
   }
 
-  fn one_or_more(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+  fn one_or_more<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let res = rule(self)?;
     self.zero_or_more(rule)?;
     Some(res)
   }
 
-  fn zero_or_more(&mut self, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
+  fn zero_or_more<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let mut pos = self.get_pos();
     let mut res = rule(self);
-    let mut last: Option<char> = Some('\0');
+    let mut last: Option<T> = Some(T::default());
 
     while res.is_some() {
       pos = self.get_pos();
@@ -323,10 +350,12 @@ impl Parser {
     last
   }
 
-  fn r_num(&mut self) -> Option<char> {
-    self.tok(TokTag::NumTok, |s| { 
-      s.maybe(|s|{s.char('e')})?;
+  fn r_num(&mut self) -> Option<Node> {
+    self.yield_tok(TokTag::NumTok, |s| {
       s.one_or_more(|s|{s.char_class("0123456789")})
+    }).and_then(|tok|{
+      let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
+      Some(Node::Leaf { tok, value: Value::N(decval) })
     })
   }
 
@@ -337,88 +366,95 @@ impl Parser {
     Some(bookend)
   }
 
-  fn r_string(&mut self) -> Option<char> {
-    self.tok(TokTag::StringTok, |s| {
+  fn r_string(&mut self) -> Option<Node> {
+    self.yield_tok(TokTag::StringTok, |s| {
       s.select([
         |s|{s.match_string('\'')},
         |s|{s.match_string('"')},
       ])
-    }) 
+    }).and_then(|tok|{
+      let pos = tok.pos as usize;
+      let end = tok.len as usize + pos;
+      let body: String = self.buf[pos+1..end-1].iter().collect();
+      Some(Leaf { tok: tok, value: Value::S(body) })
+    })
   }
 
-  fn r_plus(&mut self) -> Option<char> {
+  fn match_plus(&mut self) -> Option<char> {
     self.char('+')
   }
-  fn r_minus(&mut self) -> Option<char> {
+  fn match_minus(&mut self) -> Option<char> {
     self.char('-')
   }
-  fn r_mult(&mut self) -> Option<char> {
+  fn match_mult(&mut self) -> Option<char> {
     self.char('*')
   }
-  fn r_div(&mut self) -> Option<char> {
+  fn match_div(&mut self) -> Option<char> {
     self.char('/')
   }
-  fn r_lpar(&mut self) -> Option<char> {
-    self.char('(')
-  }
-  fn r_rpar(&mut self) -> Option<char> {
-    self.char(')')
-  }
-
-  fn r_term1(&mut self) -> Option<char> {
+  
+  fn r_term_literal(&mut self) -> Option<Node> {
     self.select([
       |s|{s.r_num()},
       |s|{s.r_string()},
     ])
   }
 
-  fn r_term2(&mut self) -> Option<char> {
-    None
+  fn match_lpar(&mut self) -> Option<char> {
+    self.push_tok(TokTag::LParTok,|s|s.char('('))
+  }
+  fn match_rpar(&mut self) -> Option<char> {
+    self.push_tok(TokTag::RParTok, |s|s.char(')'))
   }
 
-  fn r_term3(&mut self) -> Option<char> {
-    self.r_lpar()?;
+  fn r_term_paren(&mut self) -> Option<Node> {
+    self.match_lpar()?;
     let expr = self.r_expr()?;
-    self.r_rpar()?;
+    self.match_rpar()?;
     Some(expr)
   }
 
-  fn r_term(&mut self) -> Option<char> {
+  fn r_term(&mut self) -> Option<Node> {
     self.select([
-      |s|{s.r_term1()},
-      |s|{s.r_term2()},
-      |s|{s.r_term3()},
+      |s|s.r_term_literal(),
+      |s|s.r_term_paren(),
     ])
   }
 
-  fn r_binop(&mut self) -> Option<char> {
-    self.tok(TokTag::OpTok, |s|{
+  fn match_binop(&mut self) -> Option<char> {
+    self.push_tok(TokTag::OpTok, |s|{
       s.select([
-        |s|{s.r_plus()},
-        |s|{s.r_minus()},
-        |s|{s.r_mult()},
-        |s|{s.r_div()},
+        |s|s.match_plus(),
+        |s|s.match_minus(),
+        |s|s.match_mult(),
+        |s|s.match_div(),
       ])
     })
   }
 
-  fn r_expr_binop(&mut self) -> Option<char> {
-    self.r_term()?;
+  fn r_expr_binop(&mut self) -> Option<Node> {
+    let lnode = self.r_term()?;
+    let left = self.push_node(lnode);
+    
     self.maybe_ws()?;
-    let op = self.r_binop()?;
+    let op = self.match_binop()?;
     self.maybe_ws()?;
-    self.r_expr()?;
-    Some(op)
+    let rnode = self.r_expr()?;
+    let right = self.push_node(rnode);
+    Some(BinOp { op: op, lhs: left, rhs: right })
   }
 
-  fn r_sym(&mut self) -> Option<char> {
-    self.tok(TokTag::SymTok, |s|{
+  fn r_sym(&mut self) -> Option<Node> {
+    self.yield_tok(TokTag::SymTok, |s|{
       s.one_or_more(|s|{ s.nocase_class("abcdefghijklmnopqrstuvwxyz") })
+    }).and_then(|tok|{
+      Some(Symbol{ tok: tok })
     })
+
   }
 
-  fn r_expr_assign(&mut self) -> Option<char> {
-    self.tok(TokTag::KWTok, |s|{
+  fn r_expr_assign(&mut self) -> Option<Node> {
+    self.push_tok(TokTag::KWTok, |s|{
       s.select([
         |s|{s.string("val")},
         |s|{s.string("var")},
@@ -430,50 +466,62 @@ impl Parser {
     let op = self.char('=')?;
     self.maybe_ws()?;
     self.r_expr()?;
-    Some(op)
+    // Some(op)
+    Some(Nil{ch: op})
   }
 
-  fn match_compound(&mut self, start: char, end: char, delim: char) -> Option<char> {
-    let res = self.tok(TokTag::LBckTok, |s|s.char(start))?;
+  fn match_compound(&mut self, start: char, end: char, start_tag: TokTag, end_tag: TokTag) -> Option<char> {
+    let res = self.push_tok(start_tag, |s|s.char(start))?;
     self.maybe_ws()?;
     self.r_expr()?;
     self.maybe_ws()?;
     self.zero_or_more(|s|{
-      s.maybe(|s|s.char(delim))?;
+      s.maybe(|s|s.char(','))?;
       s.r_expr()?;
       s.maybe_ws()
     })?;
-    self.tok(TokTag::RBckTok, |s|s.char(end))?;
+    self.push_tok(end_tag, |s|s.char(end))?;
     Some(res)
   }
 
   fn r_expr_index(&mut self) -> Option<char> {
-    self.match_compound('[', ']', ',')
+    self.match_compound('[', ']', TokTag::LBckTok, TokTag::RBckTok)
   }
 
   fn r_expr_addr(&mut self) -> Option<char> {
-    self.match_compound('{', '}', ',')
+    self.match_compound('{', '}', TokTag::LBrcTok, TokTag::RBrcTok)
   }
 
-  fn r_expr_lookup(&mut self) -> Option<char> {
+  fn r_expr_lookup(&mut self) -> Option<Node> {
     self.r_sym()
   }
 
-  fn r_expr(&mut self) -> Option<char>  {
+  fn r_expr(&mut self) -> Option<Node>  {
     self.maybe_ws()?;
     let res = self.select([
       |s| s.r_expr_binop(),
       |s| s.r_term(),
       |s| s.r_expr_assign(),
       |s| s.r_expr_lookup(),
-      |s| s.r_expr_index(),
-      |s| s.r_expr_addr(),
+      |s| {let ch = s.r_expr_index()?; Some(Nil{ch: ch})},
+      |s| {let ch = s.r_expr_addr()?; Some(Nil{ch: ch})},
     ])?;
     self.maybe_ws()?;
     Some(res)
   }
 
-  pub fn parse(&mut self) -> Option<char> {
+  pub fn scan(&mut self) -> Option<char> {
+    self.r_expr().and_then(|node|{
+      match node {
+        Leaf { tok, value } => Some(self.get_char(tok)),
+        BinOp { op, lhs, rhs } => Some(op),
+        Nil { ch } => Some(ch),
+        _ => None
+      }
+    })
+  }
+
+  pub fn parse(&mut self) -> Option<Node> {
     self.r_expr()
   }
 }
@@ -489,6 +537,7 @@ mod tests {
 
   #[test]
   fn test_parser_basics() {
+    use Node::*;
     let mut p = Parser::new("hi");
 
     assert_eq!(p.next(), Some('h'));
@@ -497,7 +546,7 @@ mod tests {
     assert_eq!(p.next(), None);
 
     p = Parser::new("1  ");
-    assert_eq!(p.r_expr(), Some('1'));
+    assert_eq!(p.scan(), Some('1'));
 
 
     p = Parser::new("    x     y");
@@ -506,38 +555,35 @@ mod tests {
     assert_eq!(p.ws(), Some(' '));
     assert_eq!(p.ws(), None);
 
-    p = Parser::new("e1");
-    assert_eq!(p.r_expr(), Some('1'));
-
     p = Parser::new("111111");
-    assert_eq!(p.r_expr(), Some('1'));
+    assert_eq!(p.scan(), Some('1'));
 
     p = Parser::new("10");
-    assert_eq!(p.r_expr(), Some('1'));
+    assert_eq!(p.scan(), Some('1'));
 
     p = Parser::new("999");
-    assert_eq!(p.r_expr(), Some('9'));
+    assert_eq!(p.scan(), Some('9'));
 
     p = Parser::new("399+84729");
-    assert_eq!(p.r_expr(), Some('+'));
+    assert_eq!(p.scan(), Some('+'));
 
     p = Parser::new("1+1");
-    assert_eq!(p.r_expr(), Some('+'));
+    assert_eq!(p.scan(), Some('+'));
 
     p = Parser::new("1-1");
-    assert_eq!(p.r_expr(), Some('-'));
+    assert_eq!(p.scan(), Some('-'));
 
     p = Parser::new("1/1");
-    assert_eq!(p.r_expr(), Some('/'));
+    assert_eq!(p.scan(), Some('/'));
 
     p = Parser::new("1-1");
-    assert_eq!(p.r_expr(), Some('-'));
+    assert_eq!(p.scan(), Some('-'));
 
     p = Parser::new("(1)");
-    assert_eq!(p.r_expr(), Some('1'));
+    assert_eq!(p.scan(), Some('1'));
 
     p = Parser::new("(1+(1 +1 +1) +1)");
-    assert_eq!(p.r_expr(), Some('+'));
+    assert_eq!(p.scan(), Some('+'));
 
   }
 
@@ -545,7 +591,7 @@ mod tests {
   fn test_parser_tokens() {
     // let mut p = Parser::new("999");
     let mut p = Parser::new("789+234");
-    assert_eq!(p.r_expr(), Some('+'));
+    assert_eq!(p.scan(), Some('+'));
     assert_eq!(p.tokens.len(), 3);
     assert_eq!(p.tok_values(), vec_strings!["789","+","234"]);
   }
@@ -554,12 +600,12 @@ mod tests {
   fn test_parser_strings() {
     // let mut p = Parser::new("999");
     let mut p = Parser::new("'asdf'");
-    assert_eq!(p.r_expr(), Some('\''));
+    assert_eq!(p.scan(), Some('\''));
     assert_eq!(p.tokens.len(), 1);
     assert_eq!(p.tok_values(), vec_strings!["'asdf'"]);
 
     let mut p = Parser::new("\"qwerty\"");
-    assert_eq!(p.r_expr(), Some('\"'));
+    assert_eq!(p.scan(), Some('\"'));
     assert_eq!(p.tokens.len(), 1);
     assert_eq!(p.tok_values(), vec_strings!["\"qwerty\""]);
   }
@@ -567,24 +613,22 @@ mod tests {
   #[test]
   fn test_parser_index() {
     let mut p = Parser::new("[1, 2]");
-    assert_eq!(p.parse(), Some('['));
+    assert_eq!(p.scan(), Some('['));
     assert_eq!(p.tok_values(), vec_strings!("[", "1", " ", "2", "]"))
   }
 
   #[test]
   fn test_parser_addr() {
     let mut p = Parser::new("{a,Z}");
-    assert_eq!(p.parse(), Some('{'));
+    assert_eq!(p.scan(), Some('{'));
     assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"))
   }
 
   #[test]
   fn test_parser_assignment() {
-    let mut p = Parser::new("x");
-    assert_eq!(p.r_sym(), Some('x'));
     
-    p = Parser::new("val x= 1");
-    assert_eq!(p.parse(), Some('='));
+    let mut p = Parser::new("val x= 1");
+    assert_eq!(p.scan(), Some('='));
     assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
   }
 
@@ -602,13 +646,13 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{leaf: Token::empty(NumTok,0), value: N(dec(1, 0))},
-      Leaf{leaf: Token::empty(NumTok,0), value: N(dec(2, 0))},
-      Leaf{leaf: Token::empty(NumTok,0), value: I(2)},
-      Leaf{leaf: Token::empty(NumTok,0), value: F(2.0)},
-      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(1)},
-      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(2)},
-      OpBin{op: Token::empty(NumTok,0), lhs: NodeId(0), rhs: NodeId(3)},
+      Leaf{tok: Token::empty(NumTok,0), value: N(dec(1, 0))},
+      Leaf{tok: Token::empty(NumTok,0), value: N(dec(2, 0))},
+      Leaf{tok: Token::empty(NumTok,0), value: I(2)},
+      Leaf{tok: Token::empty(NumTok,0), value: F(2.0)},
+      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
+      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
+      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);    
