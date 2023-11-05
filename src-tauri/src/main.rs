@@ -95,16 +95,22 @@ fn add_row(state: State<BoardState>, tag: Tag) -> board::BoardUi {
 #[tauri::command]
 fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: String) -> board::BoardUi {
   let mut board = state.board.write().unwrap();
+  let formula = value.clone();
 
-  let data = value.parse::<f64>().unwrap_or(0.0);
-  board.set_pos(tag, pos, data);
+  let mut p = Parser::new(value);
+  match p.parse() {
+    Some(node) => {
+      let res = node.eval(&p);
+      board.set_pos(tag, pos, Cell{
+        value: res, 
+        formula: formula, 
+        style: "".to_owned(),
+      });
+    },
+    None => board.set_pos(tag, pos, 0)
+  }
 
   return board.render()
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-  format!("Hello, {}", name)
 }
 
 fn main() {
