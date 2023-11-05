@@ -1,5 +1,5 @@
-use std::{collections::HashMap, cell::RefCell};
-use std::rc::Rc;
+use std::{collections::HashMap};
+use std::convert::TryInto;
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 
@@ -113,6 +113,7 @@ pub enum Node {
   UniOp{op: char, rhs: NodeId},
   Index{row: NodeId, col: NodeId},
   Addr{row: NodeId, col: NodeId},
+  List{elems: [NodeId; 8], len: usize, link: Option<NodeId>},
 }
 use Node::*;
 
@@ -125,7 +126,7 @@ impl Default for Node {
 impl Node {
   pub fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
-      Leaf{tok: leaf, value} => ctx.get_value(value).to_owned(),
+      Leaf{tok: _, value} => ctx.get_value(value).to_owned(),
       BinOp{op, lhs, rhs} => {
         let left = ctx.get_ast(lhs).eval(ctx);
         let right = ctx.get_ast(rhs).eval(ctx);
@@ -149,6 +150,16 @@ impl Node {
           _ => Value::N(Decimal::from(0)),
         }
       },
+      List { elems, len, link } => {
+        if link.is_some() {
+          panic!("list linking not impl");
+        }
+        let vals: Vec<Value> = elems.iter().take(*len).map(|nid|{
+          let node = ctx.get_ast(nid);
+          node.eval(ctx)
+        }).collect();
+        Value::L(vals)
+      }
       _ => Value::default(),
     }
   }
@@ -407,7 +418,7 @@ impl Parser {
     Some(res)
   }
 
-  fn zero_or_more<T: Copy + Default>(&mut self, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+  fn zero_or_more<T: Copy + Default>(&mut self, mut rule: impl FnMut(&mut Parser) -> Option<T>) -> Option<T> {
     let mut state = self.save();
     let mut res = rule(self);
     let mut last: Option<T> = Some(T::default());
@@ -521,6 +532,33 @@ impl Parser {
     Some(BinOp { op: op, lhs: left, rhs: right })
   }
 
+  fn r_expr_list(&mut self) -> Option<Node> {
+    let lnode = self.r_term()?;
+    let first = self.push_node(lnode);
+
+    let mut elems = vec![first];
+
+    self.maybe_ws()?;
+    self.char(',')?;
+    self.zero_or_more(|s|{
+      s.maybe_ws()?;
+      s.maybe(|s|s.char(','))?;
+      let node = s.r_expr()?;
+      let nid = s.push_node(node);
+      elems.push(nid);
+      Some(node)
+    })?;
+
+    if elems.len() > 8 {
+      panic!("linked list not impl");
+    }
+
+    let len = elems.len();
+    elems.extend(vec![NodeId(0); 8 - len]);
+    let elems_array: [NodeId; 8] =  elems.try_into().unwrap();
+    Some(List { elems: elems_array, len: len, link: None })
+  }
+
   fn r_sym(&mut self) -> Option<Node> {
     self.yield_tok(TokTag::SymTok, |s|{
       s.one_or_more(|s|{ s.nocase_class("abcdefghijklmnopqrstuvwxyz") })
@@ -585,6 +623,7 @@ impl Parser {
     self.maybe_ws()?;
     let res = self.select([
       |s| s.r_expr_binop(),
+      |s| s.r_expr_list(),
       |s| s.r_term(),
       |s| s.r_expr_assign(),
       |s| s.r_expr_lookup(),
@@ -717,13 +756,38 @@ mod tests {
   }
 
   #[test]
-  fn test_parse_eval() {
+  fn test_parser_list() {
+    let mut p = Parser::new("1,2,3");
+    assert!(p.parse().is_some());
+    assert_eq!(p.tok_values(), vec_strings!["1","2","3"]);
+  }
+
+  #[test]
+  fn test_parse_eval_math() {
     let mut p = Parser::new("3*7*(1+1)/2");
     let node = p.parse();
     assert!(node.is_some());
 
     let res = node.unwrap().eval(&p);
     assert_eq!(res, Value::N(Decimal::new(21,0)))
+  }
+  
+  #[test]
+  fn test_parse_eval_values() {
+    let mut p = Parser::new("1,2,3");
+    let node = p.parse();
+    assert!(node.is_some());
+
+    // TODO - left recursive or manually unwrap in x_or_more
+
+    let res = node.unwrap().eval(&p);
+    assert_eq!(res, Value::L(vec![
+      Value::N(Decimal::from(1)),
+      Value::L(vec![
+        Value::N(Decimal::from(2)),
+        Value::N(Decimal::from(3)),
+      ]), 
+    ]))
   }
 
   #[test]
