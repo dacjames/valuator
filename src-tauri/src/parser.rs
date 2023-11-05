@@ -144,9 +144,7 @@ impl Parser {
   }
 
   fn tok_ctx(&self, tag: TokTag) -> TokCtx {
-    TokCtx{
-      tok: Token::empty(tag, self.pos as u32),
-    }
+    TokCtx{ tok: Token::empty(tag, self.pos as u32) }
   }
 
   fn tok(&mut self, tag: TokTag, rule: impl Fn(&mut Parser) -> Option<char>) -> Option<char> {
@@ -161,10 +159,6 @@ impl Parser {
     }
   } 
 
-  fn get_pos(&self) -> usize {
-      self.pos
-  }
-
   fn tok_value(&self, tok: Token) -> String {
     let p = tok.pos as usize;
     let len = tok.len as usize;
@@ -174,6 +168,10 @@ impl Parser {
 
   fn tok_values(&self) -> Vec<String> {
     self.tokens.iter().map(|t|{ self.tok_value(*t) }).collect()
+  }
+
+  fn get_pos(&self) -> usize {
+      self.pos
   }
 
   fn set_pos(&mut self, p: usize) {
@@ -220,7 +218,7 @@ impl Parser {
   }
 
 
-  fn like_char(&mut self, needle: char) -> Option<char> {
+  fn char(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
     if item == needle { 
       Some(needle) 
@@ -238,23 +236,14 @@ impl Parser {
     }
   }
 
-  fn like_str<S: Into<String>>(&mut self, needle: S) -> Option<char> {
+  fn string<S: Into<String>>(&mut self, needle: S) -> Option<char> {
     let needle_string: String = needle.into();
     let mut iter = needle_string.chars();
-    let mut res = self.like_char(iter.next()?)?;
+    let mut res = self.char(iter.next()?)?;
     for ch in iter {
-      res = self.like_char(ch)?;
+      res = self.char(ch)?;
     }
     Some(res)
-  }
-
-  fn exact(&mut self, needle: char) -> Option<char> {
-    let item = self.next()?;
-    if item == needle { 
-      Some(needle) 
-    } else {
-      None
-    }
   }
 
   fn select<const N: usize>(&mut self, rules: [Rule; N]) -> Option<char> {
@@ -336,15 +325,15 @@ impl Parser {
 
   fn r_num(&mut self) -> Option<char> {
     self.tok(TokTag::NumTok, |s| { 
-      s.maybe(|s|{s.like_char('e')})?;
+      s.maybe(|s|{s.char('e')})?;
       s.one_or_more(|s|{s.char_class("0123456789")})
     })
   }
 
   fn match_string(&mut self, bookend: char) -> Option<char> {
-    self.like_char(bookend)?;
+    self.char(bookend)?;
     self.zero_or_more(move |s|{s.not_char(bookend)})?;
-    self.like_char(bookend)?;
+    self.char(bookend)?;
     Some(bookend)
   }
 
@@ -358,22 +347,22 @@ impl Parser {
   }
 
   fn r_plus(&mut self) -> Option<char> {
-    self.like_char('+')
+    self.char('+')
   }
   fn r_minus(&mut self) -> Option<char> {
-    self.like_char('-')
+    self.char('-')
   }
   fn r_mult(&mut self) -> Option<char> {
-    self.like_char('*')
+    self.char('*')
   }
   fn r_div(&mut self) -> Option<char> {
-    self.like_char('/')
+    self.char('/')
   }
   fn r_lpar(&mut self) -> Option<char> {
-    self.like_char('(')
+    self.char('(')
   }
   fn r_rpar(&mut self) -> Option<char> {
-    self.like_char(')')
+    self.char(')')
   }
 
   fn r_term1(&mut self) -> Option<char> {
@@ -431,30 +420,30 @@ impl Parser {
   fn r_expr_assign(&mut self) -> Option<char> {
     self.tok(TokTag::KWTok, |s|{
       s.select([
-        |s|{s.like_str("val")},
-        |s|{s.like_str("var")},
+        |s|{s.string("val")},
+        |s|{s.string("var")},
       ])
     })?;
     self.ws()?;
     self.r_sym()?;
     self.maybe_ws()?;
-    let op = self.like_char('=')?;
+    let op = self.char('=')?;
     self.maybe_ws()?;
     self.r_expr()?;
     Some(op)
   }
 
   fn match_compound(&mut self, start: char, end: char, delim: char) -> Option<char> {
-    let res = self.tok(TokTag::LBckTok, |s|s.like_char(start))?;
+    let res = self.tok(TokTag::LBckTok, |s|s.char(start))?;
     self.maybe_ws()?;
     self.r_expr()?;
     self.maybe_ws()?;
     self.zero_or_more(|s|{
-      s.maybe(|s|s.like_char(delim))?;
+      s.maybe(|s|s.char(delim))?;
       s.r_expr()?;
       s.maybe_ws()
     })?;
-    self.tok(TokTag::RBckTok, |s|s.like_char(end))?;
+    self.tok(TokTag::RBckTok, |s|s.char(end))?;
     Some(res)
   }
 
@@ -549,10 +538,6 @@ mod tests {
 
     p = Parser::new("(1+(1 +1 +1) +1)");
     assert_eq!(p.r_expr(), Some('+'));
-
-    p = Parser::new("1 +1");
-    assert_eq!(p.exact('1'), Some('1'));
-    assert_eq!(p.exact('1'), None);
 
   }
 
