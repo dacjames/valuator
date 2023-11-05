@@ -48,7 +48,7 @@ impl Default for NodeId {
   }
 }
 
-trait EvalContext {
+pub trait EvalContext {
   fn get_ast(&self, node: &NodeId) -> &Node;
 }
 
@@ -106,7 +106,7 @@ impl Default for Node {
 }
 
 impl Node {
-  fn eval(&self, ctx: &impl EvalContext) -> Value {
+  pub fn eval(&self, ctx: &impl EvalContext) -> Value {
     match self {
       Leaf{tok: leaf, value} => value.to_owned(),
       BinOp{op, lhs, rhs} => {
@@ -549,6 +549,7 @@ impl Parser {
   }
 
   pub fn parse(&mut self) -> Option<Node> {
+    self.set_pos(0);
     self.r_expr()
   }
 }
