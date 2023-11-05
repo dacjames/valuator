@@ -435,7 +435,7 @@ impl Parser {
   fn r_expr_binop(&mut self) -> Option<Node> {
     let lnode = self.r_term()?;
     let left = self.push_node(lnode);
-    
+
     self.maybe_ws()?;
     let op = self.match_binop()?;
     self.maybe_ws()?;
@@ -470,8 +470,8 @@ impl Parser {
     Some(Nil{ch: op})
   }
 
-  fn match_compound(&mut self, start: char, end: char, start_tag: TokTag, end_tag: TokTag) -> Option<char> {
-    let res = self.push_tok(start_tag, |s|s.char(start))?;
+  fn match_compound(&mut self, start: (char, TokTag), end: (char, TokTag)) -> Option<char> {
+    let res = self.push_tok(start.1, |s|s.char(start.0))?;
     self.maybe_ws()?;
     self.r_expr()?;
     self.maybe_ws()?;
@@ -480,16 +480,16 @@ impl Parser {
       s.r_expr()?;
       s.maybe_ws()
     })?;
-    self.push_tok(end_tag, |s|s.char(end))?;
+    self.push_tok(end.1, |s|s.char(end.0))?;
     Some(res)
   }
 
   fn r_expr_index(&mut self) -> Option<char> {
-    self.match_compound('[', ']', TokTag::LBckTok, TokTag::RBckTok)
+    self.match_compound(('[', TokTag::LBckTok), (']', TokTag::RBckTok))
   }
 
   fn r_expr_addr(&mut self) -> Option<char> {
-    self.match_compound('{', '}', TokTag::LBrcTok, TokTag::RBrcTok)
+    self.match_compound(('{', TokTag::LBrcTok), ('}',  TokTag::RBrcTok))
   }
 
   fn r_expr_lookup(&mut self) -> Option<Node> {
