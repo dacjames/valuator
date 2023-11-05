@@ -11,8 +11,12 @@ enum TokTag {
   NumTok,
   OpTok,
   SymTok,
+  KWTok,
   WSTok,
-  StringTok
+  StringTok,
+  LPrnTok, RPrnTok,
+  LBckTok, RBckTok,
+  LBrcTok, RBrcTok,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -150,7 +154,6 @@ impl Parser {
     let res = rule(self);
     match res {
       Some(_) => {
-
         self.tokens.push(tokctx.end(self.pos as u32));
         res
       }
@@ -183,14 +186,6 @@ impl Parser {
     Some(*item)
   }
 
-  fn next_nonws(&mut self) -> Option<char> {
-    let mut item = self.next()?;
-    while item.is_whitespace() {
-      item = self.next()?;
-    }
-    Some(item)
-  }
-
   fn match_ws(&mut self) -> Option<char> {
     fn is_some_whitespace(item: Option<char>) -> bool {
       item.is_some() && item.unwrap().is_whitespace()
@@ -209,12 +204,24 @@ impl Parser {
     None
   }
 
-  fn whitespace(&mut self) -> Option<char> {
+  fn ws(&mut self) -> Option<char> {
     self.tok(TokTag::WSTok, |s|{s.match_ws()})
   }
 
+  fn maybe_ws_old(&mut self) -> Option<char> {
+    self.maybe(|s|{s.ws()})
+  }
+
+  fn maybe_ws(&mut self) -> Option<char> {
+    self.tok(TokTag::WSTok, |s|{s.match_ws()}).or_else(||{
+      self.pos -= 1;
+      Some('\0')
+    })
+  }
+
+
   fn like_char(&mut self, needle: char) -> Option<char> {
-    let item = self.next_nonws()?;
+    let item = self.next()?;
     if item == needle { 
       Some(needle) 
     } else {
@@ -223,7 +230,7 @@ impl Parser {
   }
 
   fn not_char(&mut self, needle: char) -> Option<char> {
-    let item = self.next_nonws()?;
+    let item = self.next()?;
     if item != needle { 
       Some(needle) 
     } else {
@@ -268,7 +275,7 @@ impl Parser {
   }
 
   fn char_class(&mut self, chars: &str) -> Option<char> {
-    let item = self.next_nonws()?;
+    let item = self.next()?;
     if chars.contains(item) {
       Some(item)
     } else {
@@ -276,8 +283,17 @@ impl Parser {
     }
   }
 
+  fn nocase_class(&mut self, chars: &str) -> Option<char> {
+    let item = self.next()?;
+    if chars.contains(item) || chars.contains(item.to_lowercase().next().unwrap()) {
+      Some(item)
+    } else {
+      None
+    }
+  }
+
   fn not_class(&mut self, chars: &str) -> Option<char> {
-    let item = self.next_nonws()?;
+    let item = self.next()?;
     if !chars.contains(item) {
       Some(item)
     } else {
@@ -397,22 +413,75 @@ impl Parser {
     })
   }
 
-  fn r_expr1(&mut self) -> Option<char> {
+  fn r_expr_binop(&mut self) -> Option<char> {
     self.r_term()?;
+    self.maybe_ws()?;
     let op = self.r_binop()?;
+    self.maybe_ws()?;
     self.r_expr()?;
     Some(op)
   }
 
-  fn r_expr2(&mut self) -> Option<char> {
-    self.r_term()
+  fn r_sym(&mut self) -> Option<char> {
+    self.tok(TokTag::SymTok, |s|{
+      s.one_or_more(|s|{ s.nocase_class("abcdefghijklmnopqrstuvwxyz") })
+    })
+  }
+
+  fn r_expr_assign(&mut self) -> Option<char> {
+    self.tok(TokTag::KWTok, |s|{
+      s.select([
+        |s|{s.like_str("val")},
+        |s|{s.like_str("var")},
+      ])
+    })?;
+    self.ws()?;
+    self.r_sym()?;
+    self.maybe_ws()?;
+    let op = self.like_char('=')?;
+    self.maybe_ws()?;
+    self.r_expr()?;
+    Some(op)
+  }
+
+  fn match_compound(&mut self, start: char, end: char, delim: char) -> Option<char> {
+    let res = self.tok(TokTag::LBckTok, |s|s.like_char(start))?;
+    self.maybe_ws()?;
+    self.r_expr()?;
+    self.maybe_ws()?;
+    self.zero_or_more(|s|{
+      s.maybe(|s|s.like_char(delim))?;
+      s.r_expr()?;
+      s.maybe_ws()
+    })?;
+    self.tok(TokTag::RBckTok, |s|s.like_char(end))?;
+    Some(res)
+  }
+
+  fn r_expr_index(&mut self) -> Option<char> {
+    self.match_compound('[', ']', ',')
+  }
+
+  fn r_expr_addr(&mut self) -> Option<char> {
+    self.match_compound('{', '}', ',')
+  }
+
+  fn r_expr_lookup(&mut self) -> Option<char> {
+    self.r_sym()
   }
 
   fn r_expr(&mut self) -> Option<char>  {
-    self.select([
-      |s|{s.r_expr1()},
-      |s: &mut Parser|{s.r_expr2()},
-    ])
+    self.maybe_ws()?;
+    let res = self.select([
+      |s| s.r_expr_binop(),
+      |s| s.r_term(),
+      |s| s.r_expr_assign(),
+      |s| s.r_expr_lookup(),
+      |s| s.r_expr_index(),
+      |s| s.r_expr_addr(),
+    ])?;
+    self.maybe_ws()?;
+    Some(res)
   }
 
   pub fn parse(&mut self) -> Option<char> {
@@ -443,10 +512,10 @@ mod tests {
 
 
     p = Parser::new("    x     y");
-    assert_eq!(p.whitespace(), Some(' '));
+    assert_eq!(p.ws(), Some(' '));
     assert_eq!(p.next(), Some('x'));
-    assert_eq!(p.whitespace(), Some(' '));
-    assert_eq!(p.whitespace(), None);
+    assert_eq!(p.ws(), Some(' '));
+    assert_eq!(p.ws(), None);
 
     p = Parser::new("e1");
     assert_eq!(p.r_expr(), Some('1'));
@@ -509,6 +578,31 @@ mod tests {
     assert_eq!(p.tokens.len(), 1);
     assert_eq!(p.tok_values(), vec_strings!["\"qwerty\""]);
   }
+
+  #[test]
+  fn test_parser_index() {
+    let mut p = Parser::new("[1, 2]");
+    assert_eq!(p.parse(), Some('['));
+    assert_eq!(p.tok_values(), vec_strings!("[", "1", " ", "2", "]"))
+  }
+
+  #[test]
+  fn test_parser_addr() {
+    let mut p = Parser::new("{a,Z}");
+    assert_eq!(p.parse(), Some('{'));
+    assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"))
+  }
+
+  #[test]
+  fn test_parser_assignment() {
+    let mut p = Parser::new("x");
+    assert_eq!(p.r_sym(), Some('x'));
+    
+    p = Parser::new("val x= 1");
+    assert_eq!(p.parse(), Some('='));
+    assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
+  }
+
   
 
   #[test]
