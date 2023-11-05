@@ -42,6 +42,12 @@ impl Token {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeId(u32);
 
+impl Default for NodeId {
+  fn default() -> Self {
+    NodeId(0)
+  }
+}
+
 trait EvalContext {
   fn get_ast(&self, node: &NodeId) -> &Node;
 }
@@ -74,13 +80,22 @@ impl EvalContext for EvalState {
   }
 }
 
+impl EvalContext for Parser {
+  fn get_ast(&self, node: &NodeId) -> &Node {
+    &self.nodes[node.0 as usize]
+  }
+}
+
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
+  Zero{},
   Nil{ch: char},
   Symbol{tok: Token},
   Leaf{tok: Token, value: Value},
   BinOp{op: char, lhs: NodeId, rhs: NodeId},
   UniOp{op: char, rhs: NodeId},
+  Index{row: NodeId, col: NodeId},
+  Addr{row: NodeId, col: NodeId},
 }
 use Node::*;
 
@@ -100,12 +115,20 @@ impl Node {
 
         use Value::*;
 
+        let f: fn(Decimal, Decimal) -> Decimal = match *op {
+          '+' => |l,r|l + r,
+          '-' => |l,r|l - r,
+          '/' => |l,r|l / r,
+          '*' => |l,r|l * r,
+          _ => |l, r|Decimal::new(0, 0),
+        };
+
         match (left, right) {
-          (N(l), N(r)) => N(l + r),
-          (N(l), I(r)) => N(l + Decimal::from(r)),
-          (I(l), N(r)) => N(Decimal::from(l) + r),
-          (N(l), F(r)) => N(l + Decimal::from_f64(r).unwrap()),
-          (F(l), N(r)) => N(Decimal::from_f64(l).unwrap() + r),
+          (N(l), N(r)) => N(f(l,r)),
+          (N(l), I(r)) => N(f(l, Decimal::from(r))),
+          (I(l), N(r)) => N(f(Decimal::from(l), r)),
+          (N(l), F(r)) => N(f(l, Decimal::from_f64(r).unwrap())),
+          (F(l), N(r)) => N(f(Decimal::from_f64(l).unwrap(), r)),
           _ => Value::N(Decimal::from(0)),
         }
       },
@@ -145,7 +168,7 @@ impl Parser {
   pub fn new<S: Into<String>>(input: S) -> Parser {
     Parser { 
       tokens: vec![], 
-      nodes: vec![], 
+      nodes: vec![Zero{}], 
       buf: input.into().chars().collect(), 
       pos: 0,
     }
@@ -470,26 +493,34 @@ impl Parser {
     Some(Nil{ch: op})
   }
 
-  fn match_compound(&mut self, start: (char, TokTag), end: (char, TokTag)) -> Option<char> {
-    let res = self.push_tok(start.1, |s|s.char(start.0))?;
+  fn match_compound(&mut self, start: (char, TokTag), end: (char, TokTag), cb: impl Fn(NodeId, NodeId) -> Node) -> Option<Node> {
+    self.push_tok(start.1, |s|s.char(start.0))?;
     self.maybe_ws()?;
-    self.r_expr()?;
+    let row_expr = self.r_expr()?;
+    let row = self.push_node(row_expr);
     self.maybe_ws()?;
-    self.zero_or_more(|s|{
-      s.maybe(|s|s.char(','))?;
-      s.r_expr()?;
-      s.maybe_ws()
-    })?;
+    let col = self.maybe(|s|{
+      s.char(',')?;
+      let col_expr = s.r_expr()?;
+      let col = s.push_node(col_expr);
+      s.maybe_ws()?;
+      Some(col)
+    }).unwrap_or(NodeId(0));
     self.push_tok(end.1, |s|s.char(end.0))?;
-    Some(res)
+
+    Some(cb(row, col))
   }
 
-  fn r_expr_index(&mut self) -> Option<char> {
-    self.match_compound(('[', TokTag::LBckTok), (']', TokTag::RBckTok))
+  fn r_expr_index(&mut self) -> Option<Node> {
+    self.match_compound(('[', TokTag::LBckTok), (']', TokTag::RBckTok), |r, c| {
+      Index { row: r, col: c}
+    })
   }
 
-  fn r_expr_addr(&mut self) -> Option<char> {
-    self.match_compound(('{', TokTag::LBrcTok), ('}',  TokTag::RBrcTok))
+  fn r_expr_addr(&mut self) -> Option<Node> {
+    self.match_compound(('{', TokTag::LBrcTok), ('}',  TokTag::RBrcTok), |r, c| {
+      Addr { row: r, col: c}
+    })
   }
 
   fn r_expr_lookup(&mut self) -> Option<Node> {
@@ -503,22 +534,18 @@ impl Parser {
       |s| s.r_term(),
       |s| s.r_expr_assign(),
       |s| s.r_expr_lookup(),
-      |s| {let ch = s.r_expr_index()?; Some(Nil{ch: ch})},
-      |s| {let ch = s.r_expr_addr()?; Some(Nil{ch: ch})},
+      |s| s.r_expr_index(),
+      |s| s.r_expr_addr(),
     ])?;
     self.maybe_ws()?;
     Some(res)
   }
 
-  pub fn scan(&mut self) -> Option<char> {
-    self.r_expr().and_then(|node|{
-      match node {
-        Leaf { tok, value } => Some(self.get_char(tok)),
-        BinOp { op, lhs, rhs } => Some(op),
-        Nil { ch } => Some(ch),
-        _ => None
-      }
-    })
+  pub fn scan(&mut self) -> Vec<String> {
+    match self.r_expr() {
+      Some(_) => self.tok_values(),
+      None => vec![],
+    }
   }
 
   pub fn parse(&mut self) -> Option<Node> {
@@ -546,8 +573,7 @@ mod tests {
     assert_eq!(p.next(), None);
 
     p = Parser::new("1  ");
-    assert_eq!(p.scan(), Some('1'));
-
+    assert_eq!(p.scan(), vec_strings!["1", " "]);
 
     p = Parser::new("    x     y");
     assert_eq!(p.ws(), Some(' '));
@@ -556,42 +582,41 @@ mod tests {
     assert_eq!(p.ws(), None);
 
     p = Parser::new("111111");
-    assert_eq!(p.scan(), Some('1'));
+    assert_eq!(p.scan(), vec_strings!["111111"]);
 
     p = Parser::new("10");
-    assert_eq!(p.scan(), Some('1'));
+    assert_eq!(p.scan(), vec_strings!["10"]);
 
     p = Parser::new("999");
-    assert_eq!(p.scan(), Some('9'));
+    assert_eq!(p.scan(), vec_strings!["999"]);
 
     p = Parser::new("399+84729");
-    assert_eq!(p.scan(), Some('+'));
+    assert_eq!(p.scan(), vec_strings!["399","+","84729"]);
 
     p = Parser::new("1+1");
-    assert_eq!(p.scan(), Some('+'));
+    assert_eq!(p.scan(), vec_strings!["1","+","1"]);
 
     p = Parser::new("1-1");
-    assert_eq!(p.scan(), Some('-'));
+    assert_eq!(p.scan(), vec_strings!["1","-","1"]);
 
     p = Parser::new("1/1");
-    assert_eq!(p.scan(), Some('/'));
+    assert_eq!(p.scan(), vec_strings!["1","/","1"]);
 
-    p = Parser::new("1-1");
-    assert_eq!(p.scan(), Some('-'));
+    p = Parser::new("1*1");
+    assert_eq!(p.scan(), vec_strings!["1","*","1"]);
 
     p = Parser::new("(1)");
-    assert_eq!(p.scan(), Some('1'));
+    assert_eq!(p.scan(), vec_strings!["(","1",")"]);
 
     p = Parser::new("(1+(1 +1 +1) +1)");
-    assert_eq!(p.scan(), Some('+'));
-
+    assert_eq!(p.scan().len(), 16);
   }
 
   #[test]
   fn test_parser_tokens() {
     // let mut p = Parser::new("999");
     let mut p = Parser::new("789+234");
-    assert_eq!(p.scan(), Some('+'));
+    assert!(p.parse().is_some());
     assert_eq!(p.tokens.len(), 3);
     assert_eq!(p.tok_values(), vec_strings!["789","+","234"]);
   }
@@ -600,12 +625,12 @@ mod tests {
   fn test_parser_strings() {
     // let mut p = Parser::new("999");
     let mut p = Parser::new("'asdf'");
-    assert_eq!(p.scan(), Some('\''));
+    assert!(p.parse().is_some());
     assert_eq!(p.tokens.len(), 1);
     assert_eq!(p.tok_values(), vec_strings!["'asdf'"]);
 
     let mut p = Parser::new("\"qwerty\"");
-    assert_eq!(p.scan(), Some('\"'));
+    assert!(p.parse().is_some());
     assert_eq!(p.tokens.len(), 1);
     assert_eq!(p.tok_values(), vec_strings!["\"qwerty\""]);
   }
@@ -613,14 +638,14 @@ mod tests {
   #[test]
   fn test_parser_index() {
     let mut p = Parser::new("[1, 2]");
-    assert_eq!(p.scan(), Some('['));
+    assert!(p.parse().is_some());
     assert_eq!(p.tok_values(), vec_strings!("[", "1", " ", "2", "]"))
   }
 
   #[test]
   fn test_parser_addr() {
     let mut p = Parser::new("{a,Z}");
-    assert_eq!(p.scan(), Some('{'));
+    assert!(p.parse().is_some());
     assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"))
   }
 
@@ -628,11 +653,19 @@ mod tests {
   fn test_parser_assignment() {
     
     let mut p = Parser::new("val x= 1");
-    assert_eq!(p.scan(), Some('='));
+    assert!(p.parse().is_some());
     assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
   }
 
-  
+  #[test]
+  fn test_parse_eval() {
+    let mut p = Parser::new("3*7*(1+1)/2");
+    let node = p.parse();
+    assert!(node.is_some());
+
+    let res = node.unwrap().eval(&p);
+    assert_eq!(res, Value::N(Decimal::new(21,0)))
+  }
 
   #[test]
   fn test_eval_basics() {
