@@ -1,11 +1,11 @@
 [package]
-name = "finmod"
+name = "valuator"
 version = "0.1.0"
 description = "A Financial Modelling App"
 authors = ["dwoodlins@gmail.com"]
 license = ""
 repository = ""
-default-run = "finmod"
+default-run = "valuator"
 edition = "2021"
 rust-version = "1.73"
 

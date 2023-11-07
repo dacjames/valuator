@@ -1,6 +1,6 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use finmod::Parser;
+use valuator::Parser;
 
 fn bench_parse(c: &mut Criterion) {
   let mut p1 = Parser::new("1+1+23+17*(78+892/039)1+1+23+17*(78+892039)1+1+23+17*(78+8/92039)1+1+23+17*(78+892039)*'1+1+23+17*(78+892/039)1+1+23+17*(78+892039)1+1+23+17*(78+8/92039)1+1+23+17*(78+892039)'");
@@ -12,6 +12,7 @@ fn bench_parse(c: &mut Criterion) {
   c.bench_function("parse and calc", |b|b.iter(||black_box({
     let node = p2.reparse().unwrap();
     let res = node.eval(&p2);
+    res
   })));
 }
 

@@ -7,7 +7,7 @@
     "distDir": "../out"
   },
   "package": {
-    "productName": "finmod",
+    "productName": "valuator",
     "version": "0.1.0"
   },
   "tauri": {

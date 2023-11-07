@@ -6,15 +6,15 @@ A **Model** contains one of more **Boards**. Each **Board** contains zero or mor
 
 ## Board
 
-A board holds a group of related tiles. You can think of a board like a sheet in a spreadsheet. The difference is that instead of representing one sheet, Boards represent several mini-sheets.
+A board holds a group of related tiles. You can think of a board like a sheet in a spreadsheet. The difference is that instead of representing one sheet, a Boards contains several mini-sheets.
 
-Boards can be referenced by name(`#'Financial Model'`).
+Boards can be referenced as `#'Financial Model'`).
 
 ## Tile
 
 Tiles are polymorphic. A **TableTile** is the default Tile type. Other Tiles include: **GraphTile**, **QueryTile**, **PivotTile**.
 
-Tiles are referenced by name (`&Mortgage, &'Food Prices'`) or by numeric tag (`&21`). Absolute tile references are supported: `&$Mortgage` will reference the tile within the current board rather than the new board when copied or moved.
+Tiles are referenced by name (`&Mortgage, &'Food Prices'`) or by numeric id (`&21`). Absolute tile references are supported: `&$Mortgage` will reference the tile within the current board rather than the new board when copied or moved.
 
 ### TableTile
 
@@ -43,7 +43,7 @@ The `$` symbol can be applied to any reference in the same way as a spreadhseet 
 
 ### Composing References
 
-References can be composed. 
+References can be composed.
 
 - `#'Financial Model'&Mortage{Price}`
 - `&Mortgage{Price} + &Property{Cash} + &Rehab{Duration}`
@@ -51,7 +51,7 @@ References can be composed.
 
 ## Cells
 
-**Cells** are where the magic happens. A cell is composed of a **Value**, a **Formula**, a **Style**, and some additional metadata such as *History*, and *Dependencies*. 
+**Cells** are where the magic happens. A cell is composed of a **Value**, a **Formula**, a **Style**, and some additional **Metadata** such as *History*, and *Dependencies*. 
 
 
 ### Data Types
@@ -60,7 +60,7 @@ Unlike spreadsheets, cells values contain can contain few different types:
 
 Type|Description|Examples
 -|-|-
-`Number`|A real number, computed with arbitrary precision|`1`<br/>`3.14159`
+`Number`|A real number, computed with proper decimal semantics|`1`<br/>`3.14159`
 `Boolean`|True or False|`true`<br>`F`
 `Float`| A 64bit floating point number. Mainly used as an optimization for Numbers|`Float(2.0)`
 `Int`|An integer|`Int(1)`
@@ -86,7 +86,7 @@ F<br>false| Boolean False|`F`
 
 ### Operators
 
-Cell formulas can include operators. Finmod provides a wide range of builtin operators and allows custom operators to be defined by the user.
+Cell formulas can include operators. valuator provides a wide range of builtin operators and allows custom operators to be defined by the user.
 
 #### Math Operators
 
