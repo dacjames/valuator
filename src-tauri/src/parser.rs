@@ -4,6 +4,7 @@ use std::{collections::HashMap};
 use std::convert::TryInto;
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
+use rustc_hash::FxHashMap;
 
 use crate::cell::Value;
 
@@ -192,13 +193,29 @@ struct ParseState {
   len_nodes: usize,
 }
 
+fn static_str(s: &'static str) -> &'static str {
+  s
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,)]
+struct RuleKey(usize);
+
+const fn rule_key(name: &'static str) -> RuleKey {
+  let _expr: &'static str = "expr";
+  RuleKey(match name {
+    _expr => 1,
+    _ => 0,
+  })
+}
+
 
 pub struct Parser {
   tokens: Vec<Token>,
   nodes: Vec<Node>,
   values: Vec<Value>,
 
-  memos: HashMap<&'static str, Box<dyn Any>>,
+  // memos: HashMap<&'static str, Box<dyn Any>>,
+  memos: FxHashMap<usize, Box<dyn Any>>,
 
   buf: Vec<char>,
   pos: usize,
@@ -210,7 +227,7 @@ impl Parser {
       tokens: vec![], 
       nodes: vec![Node::default()], 
       values: vec![Value::default()],
-      memos: HashMap::new(),
+      memos: FxHashMap::default(),
       buf: input.into().chars().collect(), 
       pos: 0,
     }
@@ -367,7 +384,7 @@ impl Parser {
     Some(res)
   }
 
-  fn char_class(&mut self, chars: &str) -> Option<char> {
+  fn class(&mut self, chars: &str) -> Option<char> {
     let item = self.next()?;
     if chars.contains(item) {
       Some(item)
@@ -441,32 +458,13 @@ impl Parser {
     last
   }
 
-  // saved_result = None
-  // def oracle_expr():
-  //   if saved_result is None:
-  //       return False
-  //   return saved_result
-  fn oracle<T: Copy + Default + 'static>(&self, name: &'static str, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
-    let saved = self.memos.get(name)?;
+  fn left<T: Copy + Default + 'static>(&self, key: RuleKey) -> Option<T> {
+    let saved = self.memos.get(&key.0)?;
     let res = *saved.downcast_ref::<Option<T>>()?;
     res
   }
 
-  // def expr_wrapper():
-  //   global saved_result
-  //   saved_result = None
-  //   parsed_length = 0
-  //   while True:
-  //       new_result = expr()
-  //       if not new_result:
-  //           break
-  //       new_parsed_length = <calculate size of new_result>
-  //       if new_parsed_length <= parsed_length:
-  //           break
-  //       saved_result = new_result
-  //       parsed_length = new_parsed_length
-  //   return saved_result
-  fn left<T: Copy + Default + 'static>(&mut self, name: &'static str, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+  fn left_rec<T: Copy + Default + 'static>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let mut saved: Option<T> = None;
     let state = self.save();
     let mut parsed = state.pos - self.pos;
@@ -481,19 +479,19 @@ impl Parser {
         break;
       }
       saved = res;
-      self.memos.insert(name, Box::new(saved));
+      self.memos.insert(key.0, Box::new(saved));
       parsed = new_parsed;
     }
     saved
   }
 
   fn r_num(&mut self) -> Option<Node> {
-
     self.yield_tok(TokTag::NumTok, |s| {
-      s.char_class("123456789")?;
-      s.zero_or_more(|s|s.char_class("0123456789"))?;
+      s.maybe(|s|s.char('-'))?;
+      s.class("123456789")?;
+      s.zero_or_more(|s|s.class("0123456789"))?;
       s.maybe(|s|s.char('.'))?;
-      s.zero_or_more(|s|s.char_class("0123456789"))
+      s.zero_or_more(|s|s.class("0123456789"))
     }).and_then(|tok|{
       let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
       Some(Node::Leaf { tok, value: self.push_value(Value::N(decval)) })
@@ -585,35 +583,8 @@ impl Parser {
     Some(BinOp { op: op, lhs: left, rhs: right })
   }
 
-  fn r_expr_list2(&mut self) -> Option<Node> {
-    let lnode = self.r_term()?;
-    let first = self.push_node(lnode);
-
-    let mut elems = vec![first];
-
-    self.maybe_ws()?;
-    self.char(',')?;
-    self.zero_or_more(|s|{
-      s.maybe_ws()?;
-      s.maybe(|s|s.char(','))?;
-      let node = s.r_expr()?;
-      let nid = s.push_node(node);
-      elems.push(nid);
-      Some(node)
-    })?;
-
-    if elems.len() > 8 {
-      panic!("linked list not impl");
-    }
-
-    let len = elems.len();
-    elems.extend(vec![NodeId(0); 8 - len]);
-    let elems_array: [NodeId; 8] =  elems.try_into().unwrap();
-    Some(List { elems: elems_array, len: len, link: None })
-  }
-
   fn r_expr_list(&mut self) -> Option<Node> {
-    let lnode = self.oracle("expr", |s|s.r_expr())?;
+    let lnode: Node = self.left(rule_key("expr"))?;
     // let lnode = self.r_term()?;
     let first = self.push_node(lnode);
 
@@ -648,23 +619,6 @@ impl Parser {
     })
 
   }
-
-  // fn r_expr_assign(&mut self) -> Option<Node> {
-  //   self.push_tok(TokTag::KWTok, |s|{
-  //     s.select([
-  //       |s|{s.string("val")},
-  //       |s|{s.string("var")},
-  //     ])
-  //   })?;
-  //   self.ws()?;
-  //   self.r_sym()?;
-  //   self.maybe_ws()?;
-  //   let op = self.char('=')?;
-  //   self.maybe_ws()?;
-  //   self.r_expr()?;
-  //   // Some(op)
-  //   Some(Nil{ch: op})
-  // }
 
   fn match_compound(&mut self, start: (char, TokTag), end: (char, TokTag), cb: impl Fn(NodeId, NodeId) -> Node) -> Option<Node> {
     self.push_tok(start.1, |s|s.char(start.0))?;
@@ -716,11 +670,7 @@ impl Parser {
   }
 
   fn r_expr(&mut self) -> Option<Node> {
-    self.left("expr", |s|s.r_expr_inner())
-  }
-
-  fn r_expr2(&mut self) -> Option<Node> {
-    self.r_expr_inner()
+    self.left_rec(rule_key("expr"), |s|s.r_expr_inner())
   }
 
   pub fn scan(&mut self) -> Vec<String> {
@@ -777,6 +727,9 @@ mod tests {
     p = Parser::new("999");
     assert_eq!(p.scan(), vec_strings!["999"]);
 
+    p = Parser::new("-42");
+    assert_eq!(p.scan(), vec_strings!["-42"]);
+
     p = Parser::new("399+84729");
     assert_eq!(p.scan(), vec_strings!["399","+","84729"]);
 
@@ -785,6 +738,11 @@ mod tests {
 
     p = Parser::new("1-1");
     assert_eq!(p.scan(), vec_strings!["1","-","1"]);
+
+    p = Parser::new("1--1");
+    assert_eq!(p.scan(), vec_strings!["1","-","-1"]);
+    p = Parser::new("1 --1");
+    assert_eq!(p.scan(), vec_strings!["1"," ","-","-1"]);
 
     p = Parser::new("1/1");
     assert_eq!(p.scan(), vec_strings!["1","/","1"]);
