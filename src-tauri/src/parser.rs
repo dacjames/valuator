@@ -145,12 +145,12 @@ impl Node {
         };
 
         match (left, right) {
-          (N(l), N(r)) => N(f(l,r)),
-          (N(l), I(r)) => N(f(l, Decimal::from(r))),
-          (I(l), N(r)) => N(f(Decimal::from(l), r)),
-          (N(l), F(r)) => N(f(l, Decimal::from_f64(r).unwrap())),
-          (F(l), N(r)) => N(f(Decimal::from_f64(l).unwrap(), r)),
-          _ => Value::N(Decimal::from(0)),
+          (Num(l), Num(r)) => Num(f(l,r)),
+          (Num(l), Int(r)) => Num(f(l, Decimal::from(r))),
+          (Int(l), Num(r)) => Num(f(Decimal::from(l), r)),
+          (Num(l), Float(r)) => Num(f(l, Decimal::from_f64(r).unwrap())),
+          (Float(l), Num(r)) => Num(f(Decimal::from_f64(l).unwrap(), r)),
+          _ => Value::Num(Decimal::from(0)),
         }
       },
       List { elems, len, link } => {
@@ -161,7 +161,7 @@ impl Node {
           let node = ctx.get_ast(nid);
           node.eval(ctx)
         }).collect();
-        Value::L(vals)
+        Value::List(vals)
       }
       _ => Value::default(),
     }
@@ -464,7 +464,7 @@ impl Parser {
     res
   }
 
-  fn left_rec<T: Copy + Default + 'static>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+  fn left_rule<T: Copy + Default + 'static>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
     let mut saved: Option<T> = None;
     let state = self.save();
     let mut parsed = state.pos - self.pos;
@@ -494,7 +494,7 @@ impl Parser {
       s.zero_or_more(|s|s.class("0123456789"))
     }).and_then(|tok|{
       let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
-      Some(Node::Leaf { tok, value: self.push_value(Value::N(decval)) })
+      Some(Node::Leaf { tok, value: self.push_value(Value::Num(decval)) })
     })
   }
 
@@ -515,7 +515,7 @@ impl Parser {
       let pos = tok.pos as usize;
       let end = tok.len as usize + pos;
       let body: String = self.buf[pos+1..end-1].iter().collect();
-      Some(Leaf{ tok: tok, value: self.push_value(Value::S(body)) })
+      Some(Leaf{ tok: tok, value: self.push_value(Value::Str(body)) })
     })
   }
 
@@ -654,7 +654,7 @@ impl Parser {
     self.r_sym()
   }
 
-  fn r_expr_inner(&mut self) -> Option<Node>  {
+  fn match_expr_inner(&mut self) -> Option<Node>  {
     self.maybe_ws()?;
     let res = self.select([
       |s| s.r_expr_binop(),
@@ -670,7 +670,7 @@ impl Parser {
   }
 
   fn r_expr(&mut self) -> Option<Node> {
-    self.left_rec(rule_key("expr"), |s|s.r_expr_inner())
+    self.left_rule(rule_key("expr"), |s|s.match_expr_inner())
   }
 
   pub fn scan(&mut self) -> Vec<String> {
@@ -816,7 +816,7 @@ mod tests {
     assert!(node.is_some());
 
     let res = node.unwrap().eval(&p);
-    assert_eq!(res, Value::N(Decimal::new(21,0)))
+    assert_eq!(res, Value::Num(Decimal::new(21,0)))
   }
   
   #[test]
@@ -828,10 +828,10 @@ mod tests {
     // TODO - left recursive or manually unwrap in x_or_more
 
     let res = node.unwrap().eval(&p);
-    assert_eq!(res, Value::L(vec![
-      Value::N(Decimal::from(1)),
-      Value::N(Decimal::from(2)),
-      Value::N(Decimal::from(3)),
+    assert_eq!(res, Value::List(vec![
+      Value::Num(Decimal::from(1)),
+      Value::Num(Decimal::from(2)),
+      Value::Num(Decimal::from(3)),
     ]))
   }
 
@@ -847,10 +847,10 @@ mod tests {
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(N(dec(1, 0)))},
-      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(N(dec(2, 0)))},
-      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(I(2))},
-      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(F(2.0))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(Num(dec(1, 0)))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(Num(dec(2, 0)))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(Int(2))},
+      Leaf{tok: Token::empty(NumTok,0), value: state.push_value(Float(2.0))},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
@@ -859,12 +859,12 @@ mod tests {
     state.load(&ast);    
 
     let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
-    assert_eq!(r1, N(dec(3, 0)));
+    assert_eq!(r1, Num(dec(3, 0)));
 
     let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
-    assert_eq!(r2, N(dec(3, 0)));
+    assert_eq!(r2, Num(dec(3, 0)));
     
     let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
-    assert_eq!(r3, N(dec(3, 0)));
+    assert_eq!(r3, Num(dec(3, 0)));
   }
 }

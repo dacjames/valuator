@@ -62,49 +62,49 @@ impl<T> CellOps for T where T:
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
-  N(Decimal),
-  B(bool),
-  F(f64),
-  I(i64),
-  S(String),
-  L(Vec<Value>),
-  A{value: Vec<Value>, dims: Vec<u32>},
-  R{value: Vec<Value>, fields: u32},
+  Num(Decimal),
+  Bool(bool),
+  Float(f64),
+  Int(i64),
+  Str(String),
+  List(Vec<Value>),
+  Array{value: Vec<Value>, dims: Vec<u32>},
+  Record{value: Vec<Value>, fields: u32},
 }
 
 impl Default for Value {
   fn default() -> Self {
-    Value::N(dec!(0))
+    Value::Num(dec!(0))
   }
 }
 
 
 impl From<usize> for Value {
   fn from(value: usize) -> Self {
-      Value::I(value as i64)
+      Value::Int(value as i64)
   }
 }
 
 impl From<f64> for Value {
   fn from(value: f64) -> Self {
-      Value::F(value as f64)
+      Value::Float(value as f64)
   }
 }
 
 impl From<i64> for Value {
   fn from(value: i64) -> Self {
-      Value::I(value as i64)
+      Value::Int(value as i64)
   }
 }
 
 impl From<bool> for Value {
   fn from(value: bool) -> Self {
-      Value::B(value)
+      Value::Bool(value)
   }
 }
 impl From<Decimal> for Value {
   fn from(value: Decimal) -> Self {
-      Value::N(value)
+      Value::Num(value)
   }
 }
 
@@ -119,16 +119,16 @@ impl ToString for Value {
     use Value::*;
 
     match &self {
-      N(value) => value.to_string(),
-      B(value) => value.to_string(),
-      F(value) => value.to_string(),
-      I(value) => value.to_string(),
-      S(value) => value.clone(),
-      L(value) => 
+      Num(value) => value.to_string(),
+      Bool(value) => value.to_string(),
+      Float(value) => value.to_string(),
+      Int(value) => value.to_string(),
+      Str(value) => value.clone(),
+      List(value) => 
         value.into_iter().map(ToString::to_string).collect::<Vec<String>>().join(","),
-      A{value, dims} =>
+      Array{value, dims} =>
         value.iter().map(ToString::to_string).collect::<Vec<String>>().join(","),
-      R{value, fields} => {
+      Record{value, fields} => {
         let kvs: Vec<String> = 
           value.chunks(2)
                .map(|p| join_cell_values(p.into_iter(), ":"))
@@ -143,43 +143,43 @@ impl RenderValue for Value {
   fn render(&self) -> ValueUi {
     use Value::*;
     match &self {
-      N(value) => 
+      Num(value) => 
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
-      B(value) => 
+      Bool(value) => 
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Boolean,
           value: value.to_string(),
         }),
-      F(value) => 
+      Float(value) => 
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
-      I(value) => 
+      Int(value) => 
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
-      S(value) =>
+      Str(value) =>
         ValueUi::V(ScalarValueUi { 
           typ: TypeUi::String, 
           value: value.clone(),
         }),
-      L(value) =>
+      List(value) =>
         ValueUi::L(ListValueUi {
           typ: TypeUi::List,
           value: value.into_iter().map(|cell| cell.to_string()).collect(),
         }),
-      A{value, dims} => 
+      Array{value, dims} => 
         ValueUi::A(ArrayValueUi { 
           typ: TypeUi::Array, 
           value: value.into_iter().map(|cell| cell.to_string()).collect(), 
           dims: dims.clone(),
         }),
-      R{value, fields} => 
+      Record{value, fields} => 
         ValueUi::R(RecordValueUi { 
           typ: TypeUi::Record, 
           value: value.into_iter().map(|cell| cell.to_string()).collect(), 
@@ -232,7 +232,7 @@ impl<T: Into<Value>> From<Vec<T>> for Cell {
     let values: Vec<Value> = value.into_iter().map(Into::into).collect();
     let formula = join_cell_values((&values).iter(), ",");
     Cell {
-      value: Value::L(values),
+      value: Value::List(values),
       formula: formula,
       style: String::new(),
     }
