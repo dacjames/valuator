@@ -1,3 +1,5 @@
+use std::any::Any;
+use std::hash::Hash;
 use std::{collections::HashMap};
 use std::convert::TryInto;
 
@@ -196,6 +198,8 @@ pub struct Parser {
   nodes: Vec<Node>,
   values: Vec<Value>,
 
+  memos: HashMap<&'static str, Box<dyn Any>>,
+
   buf: Vec<char>,
   pos: usize,
 }
@@ -206,6 +210,7 @@ impl Parser {
       tokens: vec![], 
       nodes: vec![Node::default()], 
       values: vec![Value::default()],
+      memos: HashMap::new(),
       buf: input.into().chars().collect(), 
       pos: 0,
     }
@@ -292,7 +297,7 @@ impl Parser {
     self.nodes.truncate(1);
   }
 
-  fn save(&mut self) -> ParseState {
+  fn save(&self) -> ParseState {
     ParseState{
       pos: self.get_pos(),
       len_toks: self.tokens.len(),
@@ -318,7 +323,9 @@ impl Parser {
       item = self.next();
     }
     if matched {
-      self.pos -= 1;
+      if self.pos != self.buf.len() {
+        self.pos -= 1;
+      }
       return first;
     }
     None
@@ -434,6 +441,52 @@ impl Parser {
     last
   }
 
+  // saved_result = None
+  // def oracle_expr():
+  //   if saved_result is None:
+  //       return False
+  //   return saved_result
+  fn oracle<T: Copy + Default + 'static>(&self, name: &'static str, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+    let saved = self.memos.get(name)?;
+    let res = *saved.downcast_ref::<Option<T>>()?;
+    res
+  }
+
+  // def expr_wrapper():
+  //   global saved_result
+  //   saved_result = None
+  //   parsed_length = 0
+  //   while True:
+  //       new_result = expr()
+  //       if not new_result:
+  //           break
+  //       new_parsed_length = <calculate size of new_result>
+  //       if new_parsed_length <= parsed_length:
+  //           break
+  //       saved_result = new_result
+  //       parsed_length = new_parsed_length
+  //   return saved_result
+  fn left<T: Copy + Default + 'static>(&mut self, name: &'static str, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+    let mut saved: Option<T> = None;
+    let state = self.save();
+    let mut parsed = state.pos - self.pos;
+
+    loop {
+      let res = rule(self);
+      if res.is_none() {
+        break;
+      }
+      let new_parsed = self.pos - state.pos;
+      if new_parsed <= parsed {
+        break;
+      }
+      saved = res;
+      self.memos.insert(name, Box::new(saved));
+      parsed = new_parsed;
+    }
+    saved
+  }
+
   fn r_num(&mut self) -> Option<Node> {
 
     self.yield_tok(TokTag::NumTok, |s| {
@@ -532,7 +585,7 @@ impl Parser {
     Some(BinOp { op: op, lhs: left, rhs: right })
   }
 
-  fn r_expr_list(&mut self) -> Option<Node> {
+  fn r_expr_list2(&mut self) -> Option<Node> {
     let lnode = self.r_term()?;
     let first = self.push_node(lnode);
 
@@ -559,6 +612,34 @@ impl Parser {
     Some(List { elems: elems_array, len: len, link: None })
   }
 
+  fn r_expr_list(&mut self) -> Option<Node> {
+    let lnode = self.oracle("expr", |s|s.r_expr())?;
+    // let lnode = self.r_term()?;
+    let first = self.push_node(lnode);
+
+    let mut elems = vec![first];
+
+    self.maybe_ws()?;
+    self.char(',')?;
+    self.zero_or_more(|s|{
+      s.maybe_ws()?;
+      s.maybe(|s|s.char(','))?;
+      let node = s.r_term()?;
+      let nid = s.push_node(node);
+      elems.push(nid);
+      Some(node)
+    })?;
+
+    if elems.len() > 8 {
+      panic!("linked list not impl");
+    }
+
+    let len = elems.len();
+    elems.extend(vec![NodeId(0); 8 - len]);
+    let elems_array: [NodeId; 8] =  elems.try_into().unwrap();
+    Some(List { elems: elems_array, len: len, link: None })
+  }
+
   fn r_sym(&mut self) -> Option<Node> {
     self.yield_tok(TokTag::SymTok, |s|{
       s.one_or_more(|s|{ s.nocase_class("abcdefghijklmnopqrstuvwxyz") })
@@ -568,22 +649,22 @@ impl Parser {
 
   }
 
-  fn r_expr_assign(&mut self) -> Option<Node> {
-    self.push_tok(TokTag::KWTok, |s|{
-      s.select([
-        |s|{s.string("val")},
-        |s|{s.string("var")},
-      ])
-    })?;
-    self.ws()?;
-    self.r_sym()?;
-    self.maybe_ws()?;
-    let op = self.char('=')?;
-    self.maybe_ws()?;
-    self.r_expr()?;
-    // Some(op)
-    Some(Nil{ch: op})
-  }
+  // fn r_expr_assign(&mut self) -> Option<Node> {
+  //   self.push_tok(TokTag::KWTok, |s|{
+  //     s.select([
+  //       |s|{s.string("val")},
+  //       |s|{s.string("var")},
+  //     ])
+  //   })?;
+  //   self.ws()?;
+  //   self.r_sym()?;
+  //   self.maybe_ws()?;
+  //   let op = self.char('=')?;
+  //   self.maybe_ws()?;
+  //   self.r_expr()?;
+  //   // Some(op)
+  //   Some(Nil{ch: op})
+  // }
 
   fn match_compound(&mut self, start: (char, TokTag), end: (char, TokTag), cb: impl Fn(NodeId, NodeId) -> Node) -> Option<Node> {
     self.push_tok(start.1, |s|s.char(start.0))?;
@@ -619,19 +700,27 @@ impl Parser {
     self.r_sym()
   }
 
-  fn r_expr(&mut self) -> Option<Node>  {
+  fn r_expr_inner(&mut self) -> Option<Node>  {
     self.maybe_ws()?;
     let res = self.select([
       |s| s.r_expr_binop(),
       |s| s.r_expr_list(),
       |s| s.r_term(),
-      |s| s.r_expr_assign(),
+      // |s| s.r_expr_assign(),
       |s| s.r_expr_lookup(),
       |s| s.r_expr_index(),
       |s| s.r_expr_addr(),
     ])?;
     self.maybe_ws()?;
     Some(res)
+  }
+
+  fn r_expr(&mut self) -> Option<Node> {
+    self.left("expr", |s|s.r_expr_inner())
+  }
+
+  fn r_expr2(&mut self) -> Option<Node> {
+    self.r_expr_inner()
   }
 
   pub fn scan(&mut self) -> Vec<String> {
@@ -671,7 +760,7 @@ mod tests {
     assert_eq!(p.next(), None);
 
     p = Parser::new("1  ");
-    assert_eq!(p.scan(), vec_strings!["1", " "]);
+    assert_eq!(p.scan(), vec_strings!["1", "  "]);
 
     p = Parser::new("    x     y");
     assert_eq!(p.ws(), Some(' '));
@@ -747,13 +836,13 @@ mod tests {
     assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"))
   }
 
-  #[test]
-  fn test_parser_assignment() {
+  // #[test]
+  // fn test_parser_assignment() {
     
-    let mut p = Parser::new("val x= 1");
-    assert!(p.parse().is_some());
-    assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
-  }
+  //   let mut p = Parser::new("val x= 1");
+  //   assert!(p.parse().is_some());
+  //   assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
+  // }
 
   #[test]
   fn test_parser_list() {
@@ -783,10 +872,8 @@ mod tests {
     let res = node.unwrap().eval(&p);
     assert_eq!(res, Value::L(vec![
       Value::N(Decimal::from(1)),
-      Value::L(vec![
-        Value::N(Decimal::from(2)),
-        Value::N(Decimal::from(3)),
-      ]), 
+      Value::N(Decimal::from(2)),
+      Value::N(Decimal::from(3)),
     ]))
   }
 
