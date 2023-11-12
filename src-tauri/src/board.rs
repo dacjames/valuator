@@ -24,6 +24,7 @@ impl<V: CellOps> Default for Board<V> {
   }
 }
 
+#[allow(unused)]
 impl<V: CellOps> Board<V> {
   pub fn add_tile(&mut self) -> Tag{
     let tile_tag = self.next_tag;

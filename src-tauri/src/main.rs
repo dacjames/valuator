@@ -18,7 +18,6 @@ use tauri::State;
 
 use board::Board;
 use cell::Cell;
-use rpc::CellUi;
 use parser::Parser;
 
 

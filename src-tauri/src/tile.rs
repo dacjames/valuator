@@ -4,7 +4,7 @@ use crate::tag::Tag;
 use crate::constants::*;
 use crate::handle::Handle;
 use crate::cell::CellOps;
-use crate::rpc::{TileUi, CellUi, TypeUi, ValueUi};
+use crate::rpc::{TileUi, CellUi};
 
 #[derive(Debug)]
 struct CellData<Cell: CellOps, const N: usize> {
@@ -149,6 +149,7 @@ impl<Cell: CellOps> Tile<Cell> {
 #[cfg(test)]
 mod tests {
     use crate::rpc::ScalarValueUi;
+    use crate::rpc::{ValueUi, TypeUi};
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;

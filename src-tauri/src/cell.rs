@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::{rpc::*, handle::Handle, tag::Tag};
+use crate::rpc::*;
 
 pub trait RenderCell {
   fn render(&self) -> CellUi;
@@ -61,62 +61,63 @@ impl<T> CellOps for T where T:
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum Value {
+#[allow(unused)]
+pub enum Val {
   Num(Decimal),
   Bool(bool),
   Float(f64),
   Int(i64),
   Str(String),
-  List(Vec<Value>),
-  Array{value: Vec<Value>, dims: Vec<u32>},
-  Record{value: Vec<Value>, fields: u32},
+  List(Vec<Val>),
+  Array{value: Vec<Val>, dims: Vec<u32>},
+  Record{value: Vec<Val>, fields: u32},
 }
 
-impl Default for Value {
+impl Default for Val {
   fn default() -> Self {
-    Value::Num(dec!(0))
+    Val::Num(dec!(0))
   }
 }
 
 
-impl From<usize> for Value {
+impl From<usize> for Val {
   fn from(value: usize) -> Self {
-      Value::Int(value as i64)
+      Val::Int(value as i64)
   }
 }
 
-impl From<f64> for Value {
+impl From<f64> for Val {
   fn from(value: f64) -> Self {
-      Value::Float(value as f64)
+      Val::Float(value as f64)
   }
 }
 
-impl From<i64> for Value {
+impl From<i64> for Val {
   fn from(value: i64) -> Self {
-      Value::Int(value as i64)
+      Val::Int(value as i64)
   }
 }
 
-impl From<bool> for Value {
+impl From<bool> for Val {
   fn from(value: bool) -> Self {
-      Value::Bool(value)
+      Val::Bool(value)
   }
 }
-impl From<Decimal> for Value {
+impl From<Decimal> for Val {
   fn from(value: Decimal) -> Self {
-      Value::Num(value)
+      Val::Num(value)
   }
 }
 
-fn join_cell_values<'a>(iter: core::slice::Iter<'_, Value>, sep: &str) -> String {
+fn join_cell_values<'a>(iter: core::slice::Iter<'_, Val>, sep: &str) -> String {
   iter.map(ToString::to_string)
       .collect::<Vec<String>>()
       .join(sep)
 }
 
-impl ToString for Value {
+impl ToString for Val {
   fn to_string(&self) -> String {
-    use Value::*;
+    use Val::*;
 
     match &self {
       Num(value) => value.to_string(),
@@ -125,10 +126,14 @@ impl ToString for Value {
       Int(value) => value.to_string(),
       Str(value) => value.clone(),
       List(value) => 
-        value.into_iter().map(ToString::to_string).collect::<Vec<String>>().join(","),
-      Array{value, dims} =>
-        value.iter().map(ToString::to_string).collect::<Vec<String>>().join(","),
-      Record{value, fields} => {
+        value.into_iter()
+             .map(ToString::to_string)
+             .collect::<Vec<String>>().join(","),
+      Array{value, dims: _} =>
+        value.iter()
+             .map(ToString::to_string)
+             .collect::<Vec<String>>().join(","),
+      Record{value, fields: _} => {
         let kvs: Vec<String> = 
           value.chunks(2)
                .map(|p| join_cell_values(p.into_iter(), ":"))
@@ -139,9 +144,9 @@ impl ToString for Value {
   }
 }
 
-impl RenderValue for Value {
+impl RenderValue for Val {
   fn render(&self) -> ValueUi {
-    use Value::*;
+    use Val::*;
     match &self {
       Num(value) => 
         ValueUi::V(ScalarValueUi{
@@ -191,7 +196,7 @@ impl RenderValue for Value {
 
 #[derive(Default, Debug, Clone)]
 pub struct Cell {
-  pub value: Value,
+  pub value: Val,
   pub formula: String,
   pub style: String,
 }
@@ -227,12 +232,12 @@ impl From<bool> for Cell {
 }
 
 
-impl<T: Into<Value>> From<Vec<T>> for Cell {
+impl<T: Into<Val>> From<Vec<T>> for Cell {
   fn from(value: Vec<T>) -> Self {
-    let values: Vec<Value> = value.into_iter().map(Into::into).collect();
+    let values: Vec<Val> = value.into_iter().map(Into::into).collect();
     let formula = join_cell_values((&values).iter(), ",");
     Cell {
-      value: Value::List(values),
+      value: Val::List(values),
       formula: formula,
       style: String::new(),
     }
