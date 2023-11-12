@@ -541,18 +541,10 @@ impl Parser {
     })
   }
 
-  fn match_plus(&mut self) -> Option<char> {
-    self.char('+')
-  }
-  fn match_minus(&mut self) -> Option<char> {
-    self.char('-')
-  }
-  fn match_mult(&mut self) -> Option<char> {
-    self.char('*')
-  }
-  fn match_div(&mut self) -> Option<char> {
-    self.char('/')
-  }
+  fn match_plus(&mut self) -> Option<char> { self.char('+') }
+  fn match_minus(&mut self) -> Option<char> { self.char('-') }
+  fn match_star(&mut self) -> Option<char> { self.char('*') }
+  fn match_fslash(&mut self) -> Option<char> { self.char('/') }
   
   fn r_term_literal(&mut self) -> Option<Node> {
     self.select([
@@ -587,8 +579,8 @@ impl Parser {
       s.select([
         |s|s.match_plus(),
         |s|s.match_minus(),
-        |s|s.match_mult(),
-        |s|s.match_div(),
+        |s|s.match_star(),
+        |s|s.match_fslash(),
       ])
     })
   }
