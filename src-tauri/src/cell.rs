@@ -89,15 +89,16 @@ impl From<&Val> for Decimal {
   }
 }
 
+#[allow(unused)]
 impl Val {
   fn is_scalar(self) -> bool {
     use Val::*;
     match self {
-      Num(d) => true,
-      Bool(b) => true,
-      Float(f) => true,
-      Int(i) => true,
-      Str(s) => true,
+      Num(_) => true,
+      Bool(_) => true,
+      Float(_) => true,
+      Int(_) => true,
+      Str(_) => true,
       _ => false
     }
   }

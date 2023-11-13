@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cmp::min;
 use std::hash::Hash;
 use std::{collections::HashMap};
 use std::convert::TryInto;
@@ -69,7 +70,7 @@ impl Default for NodeId {
 
 pub trait EvalContext {
   fn get_value(&self, node: &ValueId) -> &Val;
-  fn get_ast(&self, node: &NodeId) -> &Node;
+  fn get_node(&self, node: &NodeId) -> &Node;
 }
 
 struct EvalState {
@@ -107,7 +108,7 @@ impl EvalContext for EvalState {
   fn get_value(&self, value: &ValueId) -> &Val {
     self.values.get(value).unwrap()
   }
-  fn get_ast(&self, node: &NodeId) -> &Node {
+  fn get_node(&self, node: &NodeId) -> &Node {
     self.nodes.get(node).unwrap()
   }
 }
@@ -116,10 +117,12 @@ impl EvalContext for Parser {
   fn get_value(&self, node: &ValueId) -> &Val {
     &self.values[node.0 as usize]
   }
-  fn get_ast(&self, node: &NodeId) -> &Node {
+  fn get_node(&self, node: &NodeId) -> &Node {
     &self.nodes[node.0 as usize]
   }
 }
+
+const LIST_ELEMS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[allow(unused)]
@@ -131,7 +134,7 @@ pub enum Node {
   UniOp{op: char, rhs: NodeId},
   Index{row: NodeId, col: NodeId},
   Addr{row: NodeId, col: NodeId},
-  List{elems: [NodeId; 8], len: usize, link: Option<NodeId>},
+  List{elems: [NodeId; LIST_ELEMS], len: usize, link: Option<NodeId>},
 }
 use Node::*;
 
@@ -146,8 +149,8 @@ impl Node {
     match self {
       Leaf{tok: _, value} => ctx.get_value(value).to_owned(),
       BinOp{op, lhs, rhs} => {
-        let left = ctx.get_ast(lhs).eval(ctx);
-        let right = ctx.get_ast(rhs).eval(ctx);
+        let left = ctx.get_node(lhs).eval(ctx);
+        let right = ctx.get_node(rhs).eval(ctx);
 
         use Val::*;
 
@@ -177,17 +180,26 @@ impl Node {
           (Int(l), Num(r)) => Num(f(Decimal::from(l), r)),
           (Num(l), Float(r)) => Num(f(l, Decimal::from_f64(r).unwrap())),
           (Float(l), Num(r)) => Num(f(Decimal::from_f64(l).unwrap(), r)),
+          (Num(l), Bool(r)) => Num(f(l, Decimal::from(&Bool(r)))),
+          (Bool(l), Num(r)) => Num(f(Decimal::from(&Bool(l)), r)),
           _ => Val::Num(Decimal::from(0)),
         }
       },
+
       List { elems, len, link } => {
-        if link.is_some() {
-          panic!("list linking not impl");
-        }
-        let vals: Vec<Val> = elems.iter().take(*len).map(|nid|{
-          let node = ctx.get_ast(nid);
+        let clamped_len = min(*len, LIST_ELEMS);
+        let mut vals: Vec<Val> = elems.iter().take(clamped_len).map(|nid|{
+          let node = ctx.get_node(nid);
           node.eval(ctx)
         }).collect();
+
+        if *len > clamped_len {
+          let rest = ctx.get_node(&link.unwrap()).eval(ctx);
+          match rest {
+            Val::List(l) => vals.extend(l),
+            _ => (),
+          }
+        }
         Val::List(vals)
       }
       _ => Val::default(),
@@ -631,6 +643,28 @@ impl Parser {
     Some(BinOp { op: op, lhs: left, rhs: right })
   }
 
+  fn build_list(&mut self, elems: Vec<NodeId>) -> Node  {
+    let len = elems.len();
+    let clampled_len = min(len, LIST_ELEMS);
+
+    if len <= clampled_len { 
+      let mut padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
+      let extended = [elems, padding].concat();
+      return List {
+        elems: extended.try_into().unwrap(), 
+        len: len, 
+        link: None,
+      };
+    }
+
+    let link_node = self.build_list(elems[LIST_ELEMS..].to_vec());
+    List { 
+      elems: elems[..LIST_ELEMS].try_into().unwrap(), 
+      len: len, 
+      link: Some(self.push_node(link_node)),
+    }
+  }
+
   fn r_expr_list(&mut self) -> Option<Node> {
     let lnode: Node = self.left(rule_key("expr"))?;
     let first = self.push_node(lnode);
@@ -648,15 +682,7 @@ impl Parser {
       elems.push(nid);
       Some(node)
     })?;
-
-    if elems.len() > 8 {
-      panic!("linked list not impl");
-    }
-
-    let len = elems.len();
-    elems.extend(vec![NodeId(0); 8 - len]);
-    let elems_array: [NodeId; 8] =  elems.try_into().unwrap();
-    Some(List { elems: elems_array, len: len, link: None })
+    Some(self.build_list(elems))
   }
 
   fn r_sym(&mut self) -> Option<Node> {
@@ -849,10 +875,41 @@ mod tests {
   // }
 
   #[test]
-  fn test_parser_list() {
+  #[allow(non_snake_case)]
+  fn test_parse_eval_list() {
     let mut p = Parser::new("1,2,3");
     assert!(p.parse().is_some());
     assert_eq!(p.tok_values(), vec_strings!["1","2","3"]);
+
+    p = Parser::new("1,2,3,4,5,6,7,8,9,10");
+    let list_opt = p.parse();
+    assert!(list_opt.is_some());
+    assert_eq!(p.tok_values(), vec_strings!["1","2","3","4","5","6","7","8","9","10"]);
+    let list = list_opt.unwrap();
+    assert!(match list {
+      List { elems: _, len: _, link} => link.is_some(),
+      _ => false,
+    });
+    match list {
+      List { elems: _, len: _, link: Some(n)} => 
+        assert!(matches!(p.get_node(&n), _List)),
+      _ => assert!(false),
+    };
+
+    let list_val = list.eval(&p);
+    assert!(matches!(&list_val, _List));
+    assert_eq!(list_val, Val::List(vec![
+      Val::Num(Decimal::new(1,0)),
+      Val::Num(Decimal::new(2,0)),
+      Val::Num(Decimal::new(3,0)),
+      Val::Num(Decimal::new(4,0)),
+      Val::Num(Decimal::new(5,0)),
+      Val::Num(Decimal::new(6,0)),
+      Val::Num(Decimal::new(7,0)),
+      Val::Num(Decimal::new(8,0)),
+      Val::Num(Decimal::new(9,0)),
+      Val::Num(Decimal::new(10,0)),
+    ]));
   }
 
   #[test]
