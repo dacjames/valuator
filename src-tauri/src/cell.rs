@@ -24,7 +24,7 @@ impl RenderCell for f64 {
       }),
       formula: s,
       style: String::new(),
-    } 
+    }
   }
 }
 
@@ -38,24 +38,24 @@ impl RenderCell for isize {
       }),
       formula: s,
       style: String::new(),
-    } 
+    }
   }
 }
 
-pub trait ValueOps: 
+pub trait ValueOps:
   Default + Clone + ToString + Debug
   where Self: std::marker::Sized {}
 
 impl<T> ValueOps for T where T:
   Default + Clone + ToString + Debug {}
 
-pub trait CellOps: 
+pub trait CellOps:
   ValueOps + RenderCell
   where Self: std::marker::Sized {
   // This block left intentionally empty
 }
 
-impl<T> CellOps for T where T: 
+impl<T> CellOps for T where T:
   ValueOps + RenderCell {
   // This block left intentionally empty
 }
@@ -84,7 +84,7 @@ impl From<&Val> for Decimal {
       Str(s) => Decimal::from_str_radix(s, 10).unwrap_or_default(),
       List(_) => Decimal::default(),
       Array{value: _, dims: _} => Decimal::default(),
-      Record{value: _, fields: _} => Decimal::default(), 
+      Record{value: _, fields: _} => Decimal::default(),
     }
   }
 }
@@ -156,7 +156,7 @@ impl ToString for Val {
       Float(value) => value.to_string(),
       Int(value) => value.to_string(),
       Str(value) => value.clone(),
-      List(value) => 
+      List(value) =>
         value.into_iter()
              .map(ToString::to_string)
              .collect::<Vec<String>>().join(","),
@@ -165,7 +165,7 @@ impl ToString for Val {
              .map(ToString::to_string)
              .collect::<Vec<String>>().join(","),
       Record{value, fields: _} => {
-        let kvs: Vec<String> = 
+        let kvs: Vec<String> =
           value.chunks(2)
                .map(|p| join_cell_values(p.into_iter(), ":"))
                .collect();
@@ -179,29 +179,29 @@ impl RenderValue for Val {
   fn render(&self) -> ValueUi {
     use Val::*;
     match &self {
-      Num(value) => 
+      Num(value) =>
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
-      Bool(value) => 
+      Bool(value) =>
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Boolean,
           value: value.to_string(),
         }),
-      Float(value) => 
+      Float(value) =>
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
-      Int(value) => 
+      Int(value) =>
         ValueUi::V(ScalarValueUi{
           typ: TypeUi::Number,
           value: value.to_string(),
         }),
       Str(value) =>
-        ValueUi::V(ScalarValueUi { 
-          typ: TypeUi::String, 
+        ValueUi::V(ScalarValueUi {
+          typ: TypeUi::String,
           value: value.clone(),
         }),
       List(value) =>
@@ -209,16 +209,16 @@ impl RenderValue for Val {
           typ: TypeUi::List,
           value: value.into_iter().map(|cell| cell.to_string()).collect(),
         }),
-      Array{value, dims} => 
-        ValueUi::A(ArrayValueUi { 
-          typ: TypeUi::Array, 
-          value: value.into_iter().map(|cell| cell.to_string()).collect(), 
+      Array{value, dims} =>
+        ValueUi::A(ArrayValueUi {
+          typ: TypeUi::Array,
+          value: value.into_iter().map(|cell| cell.to_string()).collect(),
           dims: dims.clone(),
         }),
-      Record{value, fields} => 
-        ValueUi::R(RecordValueUi { 
-          typ: TypeUi::Record, 
-          value: value.into_iter().map(|cell| cell.to_string()).collect(), 
+      Record{value, fields} =>
+        ValueUi::R(RecordValueUi {
+          typ: TypeUi::Record,
+          value: value.into_iter().map(|cell| cell.to_string()).collect(),
           fields: *fields,
         }),
     }
@@ -318,6 +318,3 @@ impl RenderCell for Cell {
 //     }
 //   }
 // }
-
-
-
