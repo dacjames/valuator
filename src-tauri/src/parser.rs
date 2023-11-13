@@ -16,7 +16,7 @@ enum Tok {
   Num,
   Op,
   Sym,
-  // KW,
+  KW,
   WS,
   Str,
   LPar, RPar,
@@ -160,6 +160,18 @@ impl Node {
         };
 
         match (left, right) {
+          (List(l), Num(r)) => List(
+            l.iter().map(|v|{
+              let d = Decimal::from(v);
+              Num(f(d, r))
+            }).collect()
+          ),
+          (Num(l), List(r)) => List(
+            r.iter().map(|v|{
+              let d = Decimal::from(v);
+              Num(f(d, l))
+            }).collect()
+          ),
           (Num(l), Num(r)) => Num(f(l,r)),
           (Num(l), Int(r)) => Num(f(l, Decimal::from(r))),
           (Int(l), Num(r)) => Num(f(Decimal::from(l), r)),
@@ -540,16 +552,38 @@ impl Parser {
       Some(Leaf{ tok: tok, value: self.push_value(Val::Str(body)) })
     })
   }
+  fn match_bool(&mut self, needle: &'static str, value: bool) -> Option<Node> {
+    self.yield_tok(Tok::KW, |s|{
+      s.string(needle)
+    }).and_then(|tok|{
+      Some(Leaf { tok: tok, value: self.push_value(Val::Bool(value)) })
+    })
+  }
+  fn r_true(&mut self) -> Option<Node> {
+    self.match_bool("true", true)
+  }
+  fn r_false(&mut self) -> Option<Node> {
+    self.match_bool("false", false)
+  }
+
+  fn r_bool(&mut self) -> Option<Node> {
+    self.select([
+      |s|{s.r_true()},
+      |s|{s.r_false()},
+    ])
+  }    
 
   fn match_plus(&mut self) -> Option<char> { self.char('+') }
   fn match_minus(&mut self) -> Option<char> { self.char('-') }
   fn match_star(&mut self) -> Option<char> { self.char('*') }
   fn match_fslash(&mut self) -> Option<char> { self.char('/') }
   
+  
   fn r_term_literal(&mut self) -> Option<Node> {
     self.select([
       |s|{s.r_num()},
       |s|{s.r_string()},
+      |s|{s.r_bool()},
     ])
   }
 
@@ -599,7 +633,6 @@ impl Parser {
 
   fn r_expr_list(&mut self) -> Option<Node> {
     let lnode: Node = self.left(rule_key("expr"))?;
-    // let lnode = self.r_term()?;
     let first = self.push_node(lnode);
 
     let mut elems = vec![first];
@@ -607,10 +640,11 @@ impl Parser {
     self.maybe_ws()?;
     self.char(',')?;
     self.zero_or_more(|s|{
-      s.maybe_ws()?;
-      s.maybe(|s|s.char(','))?;
       let node = s.r_term()?;
       let nid = s.push_node(node);
+      s.maybe_ws()?;
+      s.maybe(|s|s.char(','))?;
+      s.maybe_ws()?;
       elems.push(nid);
       Some(node)
     })?;

@@ -36,7 +36,7 @@ function renderValue(value: ValueUi): any {
     </table>
 
     case TypeUi.Boolean: return <div>
-      {!!value.value ? "true" : "false"}
+      {value.value}
     </div>
 
     default: return <div>

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use rust_decimal_macros::dec;
 
 use crate::rpc::*;
@@ -71,6 +71,36 @@ pub enum Val {
   List(Vec<Val>),
   Array{value: Vec<Val>, dims: Vec<u32>},
   Record{value: Vec<Val>, fields: u32},
+}
+
+impl From<&Val> for Decimal {
+  fn from(value: &Val) -> Self {
+    use Val::*;
+    match value {
+      &Num(d) => d,
+      &Bool(b) => if b {Decimal::new(1, 0)} else {Decimal::new(0, 0)},
+      &Float(f) => Decimal::from_f64(f).unwrap_or_default(),
+      &Int(i) => Decimal::from_i64(i).unwrap_or_default(),
+      Str(s) => Decimal::from_str_radix(s, 10).unwrap_or_default(),
+      List(_) => Decimal::default(),
+      Array{value: _, dims: _} => Decimal::default(),
+      Record{value: _, fields: _} => Decimal::default(), 
+    }
+  }
+}
+
+impl Val {
+  fn is_scalar(self) -> bool {
+    use Val::*;
+    match self {
+      Num(d) => true,
+      Bool(b) => true,
+      Float(f) => true,
+      Int(i) => true,
+      Str(s) => true,
+      _ => false
+    }
+  }
 }
 
 impl Default for Val {
