@@ -172,7 +172,7 @@ impl Node {
           (Num(l), List(r)) => List(
             r.iter().map(|v|{
               let d = Decimal::from(v);
-              Num(f(d, l))
+              Num(f(l, d))
             }).collect()
           ),
           (Num(l), Num(r)) => Num(f(l,r)),
@@ -260,12 +260,12 @@ pub struct Parser {
 #[allow(unused)]
 impl Parser {
   pub fn new<S: Into<String>>(input: S) -> Parser {
-    Parser { 
-      tokens: vec![], 
-      nodes: vec![Node::default()], 
+    Parser {
+      tokens: vec![],
+      nodes: vec![Node::default()],
       values: vec![Val::default()],
       memos: FxHashMap::default(),
-      buf: input.into().chars().collect(), 
+      buf: input.into().chars().collect(),
       pos: 0,
     }
   }
@@ -284,7 +284,7 @@ impl Parser {
       }
       None => res,
     }
-  } 
+  }
 
   fn push_node(&mut self, node: Node) -> NodeId {
     let id = self.nodes.len() as u32;
@@ -309,7 +309,7 @@ impl Parser {
       }
       None => None,
     }
-  } 
+  }
 
   fn tok_value(&self, tok: Token) -> String {
     let p = tok.pos as usize;
@@ -395,8 +395,8 @@ impl Parser {
 
   fn char(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
-    if item == needle { 
-      Some(needle) 
+    if item == needle {
+      Some(needle)
     } else {
       None
     }
@@ -404,8 +404,8 @@ impl Parser {
 
   fn not_char(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
-    if item != needle { 
-      Some(needle) 
+    if item != needle {
+      Some(needle)
     } else {
       None
     }
@@ -439,7 +439,7 @@ impl Parser {
     }
   }
 
-  
+
   fn not_class(&mut self, chars: &'static str) -> Option<char> {
     let item = self.next()?;
     if !chars.contains(item) {
@@ -496,7 +496,7 @@ impl Parser {
     last
   }
 
-  /// "Calls" a left-recursive rule. 
+  /// "Calls" a left-recursive rule.
   fn left<T: Copy + Default + 'static>(&self, key: RuleKey) -> Option<T> {
     let saved = self.memos.get(&key.0)?;
     let res = *saved.downcast_ref::<Option<T>>()?;
@@ -583,14 +583,14 @@ impl Parser {
       |s|{s.r_true()},
       |s|{s.r_false()},
     ])
-  }    
+  }
 
   fn match_plus(&mut self) -> Option<char> { self.char('+') }
   fn match_minus(&mut self) -> Option<char> { self.char('-') }
   fn match_star(&mut self) -> Option<char> { self.char('*') }
   fn match_fslash(&mut self) -> Option<char> { self.char('/') }
-  
-  
+
+
   fn r_term_literal(&mut self) -> Option<Node> {
     self.select([
       |s|{s.r_num()},
@@ -647,20 +647,20 @@ impl Parser {
     let len = elems.len();
     let clampled_len = min(len, LIST_ELEMS);
 
-    if len <= clampled_len { 
+    if len <= clampled_len {
       let mut padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
       let extended = [elems, padding].concat();
       return List {
-        elems: extended.try_into().unwrap(), 
-        len: len, 
+        elems: extended.try_into().unwrap(),
+        len: len,
         link: None,
       };
     }
 
     let link_node = self.build_list(elems[LIST_ELEMS..].to_vec());
-    List { 
-      elems: elems[..LIST_ELEMS].try_into().unwrap(), 
-      len: len, 
+    List {
+      elems: elems[..LIST_ELEMS].try_into().unwrap(),
+      len: len,
       link: Some(self.push_node(link_node)),
     }
   }
@@ -868,7 +868,7 @@ mod tests {
 
   // #[test]
   // fn test_parser_assignment() {
-    
+
   //   let mut p = Parser::new("val x= 1");
   //   assert!(p.parse().is_some());
   //   assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
@@ -891,7 +891,7 @@ mod tests {
       _ => false,
     });
     match list {
-      List { elems: _, len: _, link: Some(n)} => 
+      List { elems: _, len: _, link: Some(n)} =>
         assert!(matches!(p.get_node(&n), _List)),
       _ => assert!(false),
     };
@@ -921,7 +921,7 @@ mod tests {
     let res = node.unwrap().eval(&p);
     assert_eq!(res, Val::Num(Decimal::new(21,0)))
   }
-  
+
   #[test]
   fn test_parse_eval_values() {
     let mut p = Parser::new("1,2,3");
@@ -960,14 +960,14 @@ mod tests {
       BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
-    state.load(&ast);    
+    state.load(&ast);
 
     let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
     assert_eq!(r1, Val::Num(dec(3, 0)));
 
     let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
     assert_eq!(r2, Val::Num(dec(3, 0)));
-    
+
     let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
     assert_eq!(r3, Val::Num(dec(3, 0)));
   }
