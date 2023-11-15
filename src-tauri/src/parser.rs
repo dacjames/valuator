@@ -402,6 +402,16 @@ impl Parser {
     }
   }
 
+  fn char_caseins(&mut self, needle: char) -> Option<char> {
+    let item = self.next()?;
+    if item.to_lowercase().next()? == needle.to_lowercase().next()? { 
+      Some(needle) 
+    } else {
+      None
+    }
+  }
+
+
   fn not_char(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
     if item != needle {
@@ -411,14 +421,22 @@ impl Parser {
     }
   }
 
-  fn string<S: Into<String>>(&mut self, needle: S) -> Option<char> {
+  fn scan_string<S: Into<String>>(&mut self, needle: S, char_rule: impl Fn(&mut Parser, char) -> Option<char>) -> Option<char> {
     let needle_string: String = needle.into();
     let mut iter = needle_string.chars();
-    let mut res = self.char(iter.next()?)?;
+    let mut res = char_rule(self, iter.next()?)?;
     for ch in iter {
       res = self.char(ch)?;
     }
     Some(res)
+  }
+
+  fn string<S: Into<String>>(&mut self, needle: S) -> Option<char> {
+    self.scan_string(needle, |s, ch|s.char(ch))
+  }
+
+  fn string_caseins<S: Into<String>>(&mut self, needle: S) -> Option<char> {
+    self.scan_string(needle, |s, ch|s.char_caseins(ch))
   }
 
   fn class(&mut self, chars: &'static str) -> Option<char> {
@@ -430,7 +448,7 @@ impl Parser {
     }
   }
 
-  fn nocase_class(&mut self, chars: &'static str) -> Option<char> {
+  fn class_caseins(&mut self, chars: &'static str) -> Option<char> {
     let item = self.next()?;
     if chars.contains(item) || chars.contains(item.to_lowercase().next().unwrap()) {
       Some(item)
@@ -502,7 +520,6 @@ impl Parser {
     let res = *saved.downcast_ref::<Option<T>>()?;
     res
   }
-
 
   /// Marks a rule as left-recursive
   fn left_rule<T: Copy + Default + 'static>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
@@ -647,8 +664,8 @@ impl Parser {
     let len = elems.len();
     let clampled_len = min(len, LIST_ELEMS);
 
-    if len <= clampled_len {
-      let mut padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
+    if len <= clampled_len { 
+      let padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
       let extended = [elems, padding].concat();
       return List {
         elems: extended.try_into().unwrap(),
@@ -687,7 +704,7 @@ impl Parser {
 
   fn r_sym(&mut self) -> Option<Node> {
     self.yield_tok(Tok::Sym, |s|{
-      s.one_or_more(|s|{ s.nocase_class("abcdefghijklmnopqrstuvwxyz") })
+      s.one_or_more(|s|{ s.class_caseins("abcdefghijklmnopqrstuvwxyz") })
     }).and_then(|tok|{
       Some(Symbol{ tok: tok })
     })
