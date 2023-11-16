@@ -9,6 +9,7 @@ mod board;
 mod cell;
 mod rpc;
 mod parser;
+mod eval;
 
 use std::sync::RwLock;
 

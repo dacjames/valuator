@@ -9,6 +9,10 @@ use rust_decimal::{Decimal, prelude::FromPrimitive};
 use rustc_hash::FxHashMap;
 
 use crate::cell::Val;
+use crate::handle::Handle;
+use crate::eval::{EvalContext, Node, EvalState};
+use crate::eval::LIST_ELEMS;
+
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
@@ -58,152 +62,13 @@ impl Default for Token {
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NodeId(u32);
+pub struct NodeId(pub u32);
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ValueId(u32);
+pub struct ValueId(pub u32);
 
 impl Default for NodeId {
   fn default() -> Self {
     NodeId(0)
-  }
-}
-
-pub trait EvalContext {
-  fn get_value(&self, node: &ValueId) -> &Val;
-  fn get_node(&self, node: &NodeId) -> &Node;
-}
-
-struct EvalState {
-  nodes: HashMap<NodeId, Node>,
-  values: HashMap<ValueId, Val>,
-}
-
-#[allow(unused)]
-impl EvalState {
-  fn new() -> EvalState {
-    EvalState{
-      nodes: HashMap::new(),
-      values: HashMap::new(),
-    }
-  }
-
-  fn insert(&mut self, node: NodeId, ast: Node) {
-    self.nodes.insert(node, ast);
-  }
-
-  fn load(&mut self, tree: &Vec<Node>) {
-    for (i, ast) in tree.iter().enumerate() {
-      self.insert(NodeId(i as u32), ast.to_owned())
-    }
-  }
-
-  fn push_value(&mut self, value: Val) -> ValueId{
-    let id = ValueId(self.values.len() as u32);
-    self.values.insert(id, value);
-    id
-  }
-}
-
-impl EvalContext for EvalState {
-  fn get_value(&self, value: &ValueId) -> &Val {
-    self.values.get(value).unwrap()
-  }
-  fn get_node(&self, node: &NodeId) -> &Node {
-    self.nodes.get(node).unwrap()
-  }
-}
-
-impl EvalContext for Parser {
-  fn get_value(&self, node: &ValueId) -> &Val {
-    &self.values[node.0 as usize]
-  }
-  fn get_node(&self, node: &NodeId) -> &Node {
-    &self.nodes[node.0 as usize]
-  }
-}
-
-const LIST_ELEMS: usize = 8;
-
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-#[allow(unused)]
-pub enum Node {
-  Zero{},
-  Symbol{tok: Token},
-  Leaf{tok: Token, value: ValueId},
-  BinOp{op: char, lhs: NodeId, rhs: NodeId},
-  UniOp{op: char, rhs: NodeId},
-  Index{row: NodeId, col: NodeId},
-  Addr{row: NodeId, col: NodeId},
-  List{elems: [NodeId; LIST_ELEMS], len: usize, link: Option<NodeId>},
-}
-use Node::*;
-
-impl Default for Node {
-  fn default() -> Self {
-    Zero { }
-  }
-}
-
-impl Node {
-  pub fn eval(&self, ctx: &impl EvalContext) -> Val {
-    match self {
-      Leaf{tok: _, value} => ctx.get_value(value).to_owned(),
-      BinOp{op, lhs, rhs} => {
-        let left = ctx.get_node(lhs).eval(ctx);
-        let right = ctx.get_node(rhs).eval(ctx);
-
-        use Val::*;
-
-        let f: fn(Decimal, Decimal) -> Decimal = match *op {
-          '+' => |l,r|l + r,
-          '-' => |l,r|l - r,
-          '/' => |l,r|l / r,
-          '*' => |l,r|l * r,
-          _ => |_l, _r|Decimal::new(0, 0),
-        };
-
-        match (left, right) {
-          (List(l), Num(r)) => List(
-            l.iter().map(|v|{
-              let d = Decimal::from(v);
-              Num(f(d, r))
-            }).collect()
-          ),
-          (Num(l), List(r)) => List(
-            r.iter().map(|v|{
-              let d = Decimal::from(v);
-              Num(f(l, d))
-            }).collect()
-          ),
-          (Num(l), Num(r)) => Num(f(l,r)),
-          (Num(l), Int(r)) => Num(f(l, Decimal::from(r))),
-          (Int(l), Num(r)) => Num(f(Decimal::from(l), r)),
-          (Num(l), Float(r)) => Num(f(l, Decimal::from_f64(r).unwrap())),
-          (Float(l), Num(r)) => Num(f(Decimal::from_f64(l).unwrap(), r)),
-          (Num(l), Bool(r)) => Num(f(l, Decimal::from(&Bool(r)))),
-          (Bool(l), Num(r)) => Num(f(Decimal::from(&Bool(l)), r)),
-          _ => Val::Num(Decimal::from(0)),
-        }
-      },
-
-      List { elems, len, link } => {
-        let clamped_len = min(*len, LIST_ELEMS);
-        let mut vals: Vec<Val> = elems.iter().take(clamped_len).map(|nid|{
-          let node = ctx.get_node(nid);
-          node.eval(ctx)
-        }).collect();
-
-        if *len > clamped_len {
-          let rest = ctx.get_node(&link.unwrap()).eval(ctx);
-          match rest {
-            Val::List(l) => vals.extend(l),
-            _ => (),
-          }
-        }
-        Val::List(vals)
-      }
-      _ => Val::default(),
-    }
   }
 }
 
@@ -578,14 +443,14 @@ impl Parser {
       let pos = tok.pos as usize;
       let end = tok.len as usize + pos;
       let body: String = self.buf[pos+1..end-1].iter().collect();
-      Some(Leaf{ tok: tok, value: self.push_value(Val::Str(body)) })
+      Some(Node::Leaf{ tok: tok, value: self.push_value(Val::Str(body)) })
     })
   }
   fn match_bool(&mut self, needle: &'static str, value: bool) -> Option<Node> {
     self.yield_tok(Tok::KW, |s|{
       s.string(needle)
     }).and_then(|tok|{
-      Some(Leaf { tok: tok, value: self.push_value(Val::Bool(value)) })
+      Some(Node::Leaf { tok: tok, value: self.push_value(Val::Bool(value)) })
     })
   }
   fn r_true(&mut self) -> Option<Node> {
@@ -657,7 +522,7 @@ impl Parser {
     self.maybe_ws()?;
     let rnode = self.r_expr()?;
     let right = self.push_node(rnode);
-    Some(BinOp { op: op, lhs: left, rhs: right })
+    Some(Node::BinOp { op: op, lhs: left, rhs: right })
   }
 
   fn build_list(&mut self, elems: Vec<NodeId>) -> Node  {
@@ -667,7 +532,7 @@ impl Parser {
     if len <= clampled_len { 
       let padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
       let extended = [elems, padding].concat();
-      return List {
+      return Node::List {
         elems: extended.try_into().unwrap(),
         len: len,
         link: None,
@@ -675,7 +540,7 @@ impl Parser {
     }
 
     let link_node = self.build_list(elems[LIST_ELEMS..].to_vec());
-    List {
+    Node::List {
       elems: elems[..LIST_ELEMS].try_into().unwrap(),
       len: len,
       link: Some(self.push_node(link_node)),
@@ -706,7 +571,7 @@ impl Parser {
     self.yield_tok(Tok::Sym, |s|{
       s.one_or_more(|s|{ s.class_caseins("abcdefghijklmnopqrstuvwxyz") })
     }).and_then(|tok|{
-      Some(Symbol{ tok: tok })
+      Some(Node::Symbol{ tok: tok })
     })
   }
 
@@ -730,13 +595,13 @@ impl Parser {
 
   fn r_expr_index(&mut self) -> Option<Node> {
     self.match_compound(('[', Tok::LBck), (']', Tok::RBck), |r, c| {
-      Index { row: r, col: c}
+      Node::Index { row: r, col: c}
     })
   }
 
   fn r_expr_addr(&mut self) -> Option<Node> {
     self.match_compound(('{', Tok::LBrc), ('}',  Tok::RBrc), |r, c| {
-      Addr { row: r, col: c}
+      Node::Addr { row: r, col: c}
     })
   }
 
@@ -780,6 +645,18 @@ impl Parser {
   }
 }
 
+
+impl EvalContext for Parser {
+  fn get_value(&self, node: &ValueId) -> &Val {
+    &self.values[node.0 as usize]
+  }
+  fn get_node(&self, node: &NodeId) -> &Node {
+    &self.nodes[node.0 as usize]
+  }
+  fn cell_value<const CARD: usize>(&self, hdl: impl Handle<CARD>) -> Val {
+      panic!("not impl!")
+  }
+}
 
 #[cfg(test)]
 mod tests {
@@ -904,11 +781,11 @@ mod tests {
     assert_eq!(p.tok_values(), vec_strings!["1","2","3","4","5","6","7","8","9","10"]);
     let list = list_opt.unwrap();
     assert!(match list {
-      List { elems: _, len: _, link} => link.is_some(),
+      Node::List { elems: _, len: _, link} => link.is_some(),
       _ => false,
     });
     match list {
-      List { elems: _, len: _, link: Some(n)} =>
+      Node::List { elems: _, len: _, link: Some(n)} =>
         assert!(matches!(p.get_node(&n), _List)),
       _ => assert!(false),
     };
@@ -960,21 +837,19 @@ mod tests {
 
   #[test]
   fn test_eval_basics() {
-    use Node::*;
-
     fn dec(num: i64, scale: u32) -> Decimal {
       Decimal::new(num, scale)
     }
 
     let mut state = EvalState::new();
     let ast = vec![
-      Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
-      Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
-      Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Int(2))},
-      Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Float(2.0))},
-      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
-      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
-      BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Int(2))},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Float(2.0))},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
     ];
 
     state.load(&ast);

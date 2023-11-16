@@ -3,12 +3,12 @@ use crate::tag::Tag;
 
 #[allow(unused)]
 pub enum Hdl<const CARD: usize> {
-  PosHdl(PosHdl<CARD>),
-  LblHdl(LblHdl<CARD>),
+  Pos(PosHdl<CARD>),
+  Label(LableHdl<CARD>),
 }
   
 #[allow(unused)]
-pub struct LblHdl<const CARD: usize> {
+pub struct LableHdl<const CARD: usize> {
   pub tag: Tag,
   pub pos: [String; CARD],
 }

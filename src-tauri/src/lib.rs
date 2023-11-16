@@ -6,5 +6,5 @@ pub mod board;
 pub mod cell;
 pub mod rpc;
 pub mod parser;
-
+pub mod eval;
 pub use parser::Parser;
