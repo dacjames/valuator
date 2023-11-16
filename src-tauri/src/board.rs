@@ -6,15 +6,29 @@ use crate::rpc::TileUi;
 use crate::tile::{Tile, TileTrait};
 use crate::tag::Tag;
 use crate::handle::Handle;
-use crate::cell::CellOps;
+use crate::cell::{CellOps, Cell};
 
 type TileMap<V> = BTreeMap<Tag, Tile<V>>;
 
-pub struct Board<V: CellOps> {
+pub struct Board<V: CellOps = Cell> {
   next_tag: Tag, 
   tiles: TileMap<V>,
 }
+impl Board {
+  pub fn example() -> Self {
+    let mut board = Self::default();
+    let tag = board.add_tile();
 
+    board.set_pos(tag, [0, 0], 2.0);
+    board.set_pos(tag, [0, 1], 17.5);
+    board.set_pos(tag, [0, 2], 37.8);
+    board.set_pos(tag, [1, 0], 3.0);
+
+    board.set_pos(tag, [1, 1], vec![1.0, 2.0]);
+    board.set_pos(tag, [1, 2], true);
+    board
+  }
+}
 impl<V: CellOps> Default for Board<V> {
   fn default() -> Board<V> {
     Board {

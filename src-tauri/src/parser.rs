@@ -660,7 +660,9 @@ impl EvalContext for Parser {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::{board::{self, Board}, cell::Cell};
+
+use super::*;
 
   macro_rules! vec_strings {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
@@ -841,7 +843,9 @@ mod tests {
       Decimal::new(num, scale)
     }
 
-    let mut state = EvalState::new();
+    let mut board = Board::<Cell>::example();
+
+    let mut state = EvalState::new(board);
     let ast = vec![
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
