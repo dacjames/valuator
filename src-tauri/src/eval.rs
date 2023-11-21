@@ -1,8 +1,8 @@
 use std::cmp::min;
 use std::collections::HashMap;
 
-use crate::board::{Board, self};
-use crate::handle::{Handle, Hdl};
+use crate::board::Board;
+use crate::handle::Handle;
 use crate::parser::{ValueId, NodeId, Token};
 use crate::cell::{Val, Cell};
 

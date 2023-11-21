@@ -1,12 +1,15 @@
 use std::any::Any;
 use std::cmp::min;
+use std::fmt::Debug;
 use std::hash::Hash;
-use std::{collections::HashMap};
 use std::convert::TryInto;
 use const_str;
+#[allow(unused)]
+use slog::{info, warn};
 
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use rustc_hash::FxHashMap;
+use log_derive::{logfn, logfn_inputs};
 
 use crate::cell::Val;
 use crate::handle::Handle;
@@ -97,11 +100,13 @@ struct ParseState {
   len_nodes: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct RuleKey(usize);
 
 const fn rule_key(name: &'static str) -> RuleKey {
-  if const_str::equal!(name, "expr") {
+  if const_str::equal!(name, "expr_list") {
+    RuleKey(2)
+  } else if const_str::equal!(name, "expr") {
     RuleKey(1)
   } else {
     RuleKey(0)
@@ -109,17 +114,31 @@ const fn rule_key(name: &'static str) -> RuleKey {
 }
 
 
-
+// #[derive(Debug)]
 pub struct Parser {
   tokens: Vec<Token>,
   nodes: Vec<Node>,
   values: Vec<Val>,
 
   // memos: HashMap<&'static str, Box<dyn Any>>,
-  memos: FxHashMap<usize, Box<dyn Any>>,
+  memos: FxHashMap<RuleKey, Box<dyn Any>>,
 
   buf: Vec<char>,
   pos: usize,
+}
+
+impl Debug for Parser {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("«")?;
+    for (i, ch) in self.buf.iter().enumerate() {
+      if i == self.pos {
+        f.write_str("|")?;
+      }
+      f.write_str(ch.to_string().as_str())?;
+    }
+    f.write_str("»")?;
+    Ok(())
+  }
 }
 
 #[allow(unused)]
@@ -214,6 +233,7 @@ impl Parser {
     self.set_pos(0);
     self.tokens.truncate(0);
     self.nodes.truncate(1);
+    self.memos.clear();
   }
 
   fn save(&self) -> ParseState {
@@ -380,14 +400,23 @@ impl Parser {
   }
 
   /// "Calls" a left-recursive rule.
-  fn left<T: Copy + Default + 'static>(&self, key: RuleKey) -> Option<T> {
-    let saved = self.memos.get(&key.0)?;
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn left<T: Copy + Default + 'static + Debug>(&self, key: RuleKey) -> Option<T> {
+    let saved = self.memos.get(&key)?;
     let res = *saved.downcast_ref::<Option<T>>()?;
     res
   }
 
+  #[logfn_inputs(Trace)]
+  fn _left_rule(&self, key: RuleKey) {
+    // dummy
+  }
+  
+  #[logfn(Trace)]
   /// Marks a rule as left-recursive
-  fn left_rule<T: Copy + Default + 'static>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+  fn left_rule<T: Copy + Default + 'static + Debug>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+    self._left_rule(key);
     let mut saved: Option<T> = None;
     let state = self.save();
     let mut len_parsed = state.pos - self.pos;
@@ -407,12 +436,14 @@ impl Parser {
       }
       saved = res;
       // save the value in the memo for left "call"
-      self.memos.insert(key.0, Box::new(saved));
+      self.memos.insert(key, Box::new(saved));
       len_parsed = new_len;
     }
     saved
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_num(&mut self) -> Option<Node> {
     self.yield_tok(Tok::Num, |s| {
       s.maybe(|s|s.char('-'))?;
@@ -498,6 +529,7 @@ impl Parser {
   fn r_term(&mut self) -> Option<Node> {
     self.select([
       |s|s.r_term_literal(),
+      |s|s.r_term_sym(),
       |s|s.r_term_paren(),
     ])
   }
@@ -547,7 +579,36 @@ impl Parser {
     }
   }
 
-  fn r_expr_list(&mut self) -> Option<Node> {
+  fn cat_list(&mut self, lnode: &Node, left: NodeId, right: NodeId) -> Node {
+    match lnode {
+      &Node::List{elems, len: LIST_ELEMS, link: None} => {
+        let empty_node = Node::List{elems: [NodeId(0); LIST_ELEMS], len: 0, link: None};
+        let empty = self.push_node(empty_node);
+        let link = self.cat_list(&empty_node, empty, right);
+        Node::List{elems: elems, len: LIST_ELEMS + 1, link: Some(self.push_node(link))}
+      },
+      &Node::List{elems, len, link: Some(link)} => {
+        let orig_link = *self.get_node(&link);
+        let new_link_node = self.cat_list(&orig_link, link, right);
+        let new_link = self.push_node(new_link_node);
+        Node::List{elems: elems, len: len + 1, link: Some(new_link)}
+      }
+      &Node::List{mut elems, len, link} => {
+        elems[len] = right;
+        Node::List{elems: elems, len: len+1, link: link}
+      }, 
+      _ => {
+        let mut elems = [NodeId(0); LIST_ELEMS];
+        elems[0] = left;
+        elems[1] = right;
+        Node::List{elems: elems, len: 2, link: None}
+      }, 
+    }
+  }
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn match_list_zero_or_more(&mut self) -> Option<Node> {
     let lnode: Node = self.left(rule_key("expr"))?;
     let first = self.push_node(lnode);
 
@@ -556,6 +617,7 @@ impl Parser {
     self.maybe_ws()?;
     self.char(',')?;
     self.zero_or_more(|s|{
+      s.maybe_ws()?;
       let node = s.r_term()?;
       let nid = s.push_node(node);
       s.maybe_ws()?;
@@ -567,7 +629,31 @@ impl Parser {
     Some(self.build_list(elems))
   }
 
-  fn r_sym(&mut self) -> Option<Node> {
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn match_list_left_rec(&mut self) -> Option<Node> {
+    // TODO benchmark match_list_left_rec against match_list_zero_or_more
+    let lnode: Node = self.left(rule_key("expr"))?;
+    let left = self.push_node(lnode);
+
+    self.maybe_ws()?;
+    self.char(',')?;
+    self.maybe_ws()?;
+    let rnode = self.r_term()?;
+    let right = self.push_node(rnode);
+
+    Some(self.cat_list(&lnode, left, right))
+  }
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn r_expr_list(&mut self) -> Option<Node> {
+    self.match_list_left_rec()
+  }
+
+
+  fn r_term_sym(&mut self) -> Option<Node> {
     self.yield_tok(Tok::Sym, |s|{
       s.one_or_more(|s|{ s.class_caseins("abcdefghijklmnopqrstuvwxyz") })
     }).and_then(|tok|{
@@ -578,21 +664,24 @@ impl Parser {
   fn match_compound(&mut self, start: (char, Tok), end: (char, Tok), cb: impl Fn(NodeId, NodeId) -> Node) -> Option<Node> {
     self.push_tok(start.1, |s|s.char(start.0))?;
     self.maybe_ws()?;
-    let row_expr = self.r_expr()?;
-    let row = self.push_node(row_expr);
-    self.maybe_ws()?;
-    let col = self.maybe(|s|{
-      s.char(',')?;
-      let col_expr = s.r_expr()?;
-      let col = s.push_node(col_expr);
-      s.maybe_ws()?;
-      Some(col)
-    }).unwrap_or(NodeId(0));
+    let inner = self.r_expr()?;
+    let mut row = NodeId(0);
+    let mut col = NodeId(0);
+
+    if let Node::List{elems, len, link: _} = inner {
+      row = elems[0];
+      col = elems[1];
+    } else {
+      row = self.push_node(inner);
+    }
+
     self.push_tok(end.1, |s|s.char(end.0))?;
 
     Some(cb(row, col))
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_expr_index(&mut self) -> Option<Node> {
     self.match_compound(('[', Tok::LBck), (']', Tok::RBck), |r, c| {
       Node::Index { row: r, col: c}
@@ -606,9 +695,11 @@ impl Parser {
   }
 
   fn r_expr_lookup(&mut self) -> Option<Node> {
-    self.r_sym()
+    self.r_term_sym()
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn match_expr(&mut self) -> Option<Node>  {
     self.maybe_ws()?;
     let res = self.select([
@@ -623,7 +714,9 @@ impl Parser {
     self.maybe_ws()?;
     Some(res)
   }
-
+  
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_expr(&mut self) -> Option<Node> {
     self.left_rule(rule_key("expr"), |s|s.match_expr())
   }
@@ -660,12 +753,23 @@ impl EvalContext for Parser {
 
 #[cfg(test)]
 mod tests {
-  use crate::{board::{self, Board}, cell::Cell};
-
-use super::*;
+  use super::*;
+  use crate::{board::Board, cell::Cell};
+  use slog::{Drain, Logger, o};
 
   macro_rules! vec_strings {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
+  }
+
+  #[allow(unused)]
+  fn test_logger() -> slog_scope::GlobalLoggerGuard {
+    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let logger = Logger::root(drain, o!());
+
+    let guard = slog_scope::set_global_logger(logger);
+    slog_stdlog::init().unwrap();
+    guard
   }
 
   #[test]
@@ -750,32 +854,46 @@ use super::*;
 
   #[test]
   fn test_parser_index() {
+    // let _scope_guard = test_logger();
+    
     let mut p = Parser::new("[1, 2]");
-    assert!(p.parse().is_some());
-    assert_eq!(p.tok_values(), vec_strings!("[", "1", " ", "2", "]"))
+    let res = p.parse();
+    assert!(res.is_some());
+    assert_eq!(p.tok_values(), vec_strings!("[","1"," ","2","]"));
+    let ast = res.unwrap();
+    assert_eq!(Node::Index{ row: NodeId(1), col: NodeId(2) }, ast);
+
+    p = Parser::new("[1]");
+    let res = p.parse();
+    assert!(res.is_some());
+    assert_eq!(p.tok_values(), vec_strings!("[","1","]"));
+    let ast = res.unwrap();
+    assert_eq!(Node::Index{ row: NodeId(1), col: NodeId(0) }, ast);
   }
 
   #[test]
   fn test_parser_addr() {
     let mut p = Parser::new("{a,Z}");
-    assert!(p.parse().is_some());
-    assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"))
+    let res = p.parse();
+    assert!(res.is_some());
+    assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"));
+    let ast = res.unwrap();
+    assert_eq!(Node::Addr { row: NodeId(1), col: NodeId(2) }, ast);
   }
 
-  // #[test]
-  // fn test_parser_assignment() {
-
-  //   let mut p = Parser::new("val x= 1");
-  //   assert!(p.parse().is_some());
-  //   assert_eq!(p.tok_values(), vec_strings!["val", " ", "x", " ", "1"]);
-  // }
 
   #[test]
   #[allow(non_snake_case)]
   fn test_parse_eval_list() {
+    // let _scope_guard = test_logger();
+
     let mut p = Parser::new("1,2,3");
     assert!(p.parse().is_some());
     assert_eq!(p.tok_values(), vec_strings!["1","2","3"]);
+
+    let mut p = Parser::new("1,2,(3,4,5)");
+    assert!(p.reparse().is_some());
+    assert_eq!(p.tok_values(), vec_strings!["1","2","(","3","4","5",")"]);
 
     p = Parser::new("1,2,3,4,5,6,7,8,9,10");
     let list_opt = p.parse();
@@ -843,7 +961,7 @@ use super::*;
       Decimal::new(num, scale)
     }
 
-    let mut board = Board::<Cell>::example();
+    let board = Board::<Cell>::example();
 
     let mut state = EvalState::new(board);
     let ast = vec![

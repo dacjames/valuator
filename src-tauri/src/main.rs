@@ -1,6 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+extern crate log;
+#[macro_use(slog_o, slog_kv)]
+extern crate slog;
+extern crate slog_stdlog;
+extern crate slog_scope;
+extern crate slog_term;
+extern crate slog_async;
+use slog::Drain;
+
 mod tile;
 mod tag;
 mod handle;
@@ -114,6 +124,16 @@ fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: Strin
 }
 
 fn main() {
+  let decorator = slog_term::TermDecorator::new().build();
+  let drain = slog_term::FullFormat::new(decorator).build().fuse();
+  let drain = slog_async::Async::new(drain).build().fuse();
+  let logger = slog::Logger::root(drain, slog_o!("version" => env!("CARGO_PKG_VERSION")));
+
+  let _scope_guard = slog_scope::set_global_logger(logger);
+  let _log_guard = slog_stdlog::init().unwrap();
+  // Note: this `info!(...)` macro comes from `log` crate
+  info!("standard logging redirected to slog");
+
   tauri::Builder::default()
     .manage::<BoardState>( BoardState{ board: RwLock::new(Board::<Cell>::default()) })
     .invoke_handler(tauri::generate_handler![

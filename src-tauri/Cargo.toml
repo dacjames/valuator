@@ -25,6 +25,14 @@ scopeguard = "1.2.0"
 rustc-hash = "1.1"
 const-str = "0.5.6"
 petgraph = { version = "0.6.4", features = ["serde-1"] }
+log = "0.4.20"
+log-derive = "0.4.1"
+slog = "2.7.0"
+slog-term = "2.9.0"
+slog-async = "2.8.0"
+slog-json = "2.6.1"
+slog-scope = "4.4.0"
+slog-stdlog = "4.1.1"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
