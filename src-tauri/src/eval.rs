@@ -2,14 +2,14 @@ use std::cmp::min;
 use std::collections::HashMap;
 
 use crate::board::Board;
-use crate::handle::Handle;
 use crate::parser::{ValueId, NodeId, Token};
 use crate::cell::{Val, Cell};
+use crate::tag::Tag;
 
 pub trait EvalContext {
   fn get_value(&self, node: &ValueId) -> &Val;
   fn get_node(&self, node: &NodeId) -> &Node;
-  fn cell_value<const CARD: usize>(&self, hdl: impl Handle<CARD>) -> Val;
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val;
 }
   
 pub struct EvalState {
@@ -17,16 +17,18 @@ pub struct EvalState {
   values: HashMap<ValueId, Val>,
   dep_graph: StableGraph<Cell, u32, Directed>,
   board: Board<Cell>,
+  tile: Tag,
 }
 
 #[allow(unused)]
 impl EvalState {
-  pub fn new(board: Board<>) -> EvalState {
+  pub fn new(board: Board<>, tile: Tag) -> EvalState {
     EvalState{
       nodes: HashMap::new(),
       values: HashMap::new(),
       dep_graph: StableGraph::new(),
       board: board,
+      tile: tile,
     }
   }
 
@@ -55,8 +57,9 @@ impl EvalContext for EvalState {
   fn get_node(&self, node: &NodeId) -> &Node {
     self.nodes.get(node).unwrap()
   }
-  fn cell_value<const CARD: usize>(&self, hdl: impl Handle<CARD>) -> Val {
-    panic!("not impl") 
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
+    let cell = self.board.get_pos(self.tile, pos);
+    cell.value
   }
 }
   
@@ -82,6 +85,7 @@ use petgraph::prelude::DiGraph;
 use petgraph::stable_graph::StableGraph;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal_macros::dec;
 
 impl Default for Node {
   fn default() -> Self {
@@ -146,6 +150,12 @@ impl Node {
           }
         }
         Val::List(vals)
+      }
+      Index { row, col } => {
+        let r: i64 = ctx.get_node(row).eval(ctx).into();
+        let c: i64 = ctx.get_node(col).eval(ctx).into();
+
+        ctx.get_pos([r as usize, c as usize])
       }
       _ => Val::default(),
     }

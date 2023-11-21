@@ -15,7 +15,7 @@ pub struct Board<V: CellOps = Cell> {
   tiles: TileMap<V>,
 }
 impl Board {
-  pub fn example() -> Self {
+  pub fn example() -> (Self, Tag) {
     let mut board = Self::default();
     let tag = board.add_tile();
 
@@ -26,7 +26,7 @@ impl Board {
 
     board.set_pos(tag, [1, 1], vec![1.0, 2.0]);
     board.set_pos(tag, [1, 2], true);
-    board
+    (board, tag)
   }
 }
 impl<V: CellOps> Default for Board<V> {

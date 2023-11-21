@@ -7,14 +7,14 @@ use const_str;
 #[allow(unused)]
 use slog::{info, warn};
 
-use rust_decimal::{Decimal, prelude::FromPrimitive};
+use rust_decimal::Decimal;
 use rustc_hash::FxHashMap;
 use log_derive::{logfn, logfn_inputs};
 
 use crate::cell::Val;
-use crate::handle::Handle;
-use crate::eval::{EvalContext, Node, EvalState};
+use crate::eval::{EvalContext, Node};
 use crate::eval::LIST_ELEMS;
+// use crate::tag::Tag;
 
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -746,15 +746,17 @@ impl EvalContext for Parser {
   fn get_node(&self, node: &NodeId) -> &Node {
     &self.nodes[node.0 as usize]
   }
-  fn cell_value<const CARD: usize>(&self, hdl: impl Handle<CARD>) -> Val {
-      panic!("not impl!")
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
+    panic!("not impl!")
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use rust_decimal_macros::dec;
   use crate::{board::Board, cell::Cell};
+  use crate::eval::EvalState;
   use slog::{Drain, Logger, o};
 
   macro_rules! vec_strings {
@@ -961,9 +963,9 @@ mod tests {
       Decimal::new(num, scale)
     }
 
-    let board = Board::<Cell>::example();
+    let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(board);
+    let mut state = EvalState::new(board, tile);
     let ast = vec![
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
@@ -984,5 +986,22 @@ mod tests {
 
     let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
     assert_eq!(r3, Val::Num(dec(3, 0)));
+  }
+
+  #[test]
+  fn test_eval_index() {
+    let (board, tile) = Board::<Cell>::example();
+
+    let mut state = EvalState::new(board, tile);
+    let ast = vec![
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(1)))},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(2)))},
+      Node::Index{row: NodeId(0), col: NodeId(1)},
+    ];
+
+    state.load(&ast);
+
+    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(Val::Bool(true), res);
   }
 }

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use rust_decimal::{Decimal, prelude::FromPrimitive};
+use rust_decimal::{Decimal, prelude::{FromPrimitive, ToPrimitive}};
 use rust_decimal_macros::dec;
 
 use crate::rpc::*;
@@ -85,6 +85,19 @@ impl From<&Val> for Decimal {
       List(_) => Decimal::default(),
       Array{value: _, dims: _} => Decimal::default(),
       Record{value: _, fields: _} => Decimal::default(),
+    }
+  }
+}
+
+impl From<Val> for i64 {
+  fn from(value: Val) -> Self {
+    use Val::*;
+    match value {
+      Num(d) => d.to_i64().unwrap_or(0),
+      Bool(b) => if b {1} else {0},
+      Float(f) => f as i64,
+      Int(i) => i,
+      _ => Default::default(),
     }
   }
 }
