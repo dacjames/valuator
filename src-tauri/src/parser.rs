@@ -8,7 +8,7 @@ use const_str;
 use slog::{info, warn};
 
 use rust_decimal::Decimal;
-use rustc_hash::FxHashMap;
+// use rustc_hash::FxHashMap;
 use log_derive::{logfn, logfn_inputs};
 
 use crate::cell::Val;
@@ -103,6 +103,7 @@ struct ParseState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct RuleKey(usize);
 
+const N_RULE_KEYS: usize = 3;
 const fn rule_key(name: &'static str) -> RuleKey {
   if const_str::equal!(name, "expr_list") {
     RuleKey(2)
@@ -113,6 +114,7 @@ const fn rule_key(name: &'static str) -> RuleKey {
   }
 }
 
+type MemoArray = [Option<Box<dyn Any>>; N_RULE_KEYS];
 
 // #[derive(Debug)]
 pub struct Parser {
@@ -120,8 +122,8 @@ pub struct Parser {
   nodes: Vec<Node>,
   values: Vec<Val>,
 
-  // memos: HashMap<&'static str, Box<dyn Any>>,
-  memos: FxHashMap<RuleKey, Box<dyn Any>>,
+  // memos: FxHashMap<RuleKey, Box<dyn Any>>,
+  memos: MemoArray,
 
   buf: Vec<char>,
   pos: usize,
@@ -148,7 +150,7 @@ impl Parser {
       tokens: vec![],
       nodes: vec![Node::default()],
       values: vec![Val::default()],
-      memos: FxHashMap::default(),
+      memos: [None, None, None],
       buf: input.into().chars().collect(),
       pos: 0,
     }
@@ -233,7 +235,7 @@ impl Parser {
     self.set_pos(0);
     self.tokens.truncate(0);
     self.nodes.truncate(1);
-    self.memos.clear();
+    self.memos = [None, None, None];
   }
 
   fn save(&self) -> ParseState {
@@ -403,20 +405,24 @@ impl Parser {
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
   fn left<T: Copy + Default + 'static + Debug>(&self, key: RuleKey) -> Option<T> {
-    let saved = self.memos.get(&key)?;
-    let res = *saved.downcast_ref::<Option<T>>()?;
-    res
+    let saved = self.memos.get(key.0)?;
+    if let Some(saved) = saved {
+      let res = *saved.downcast_ref::<Option<T>>()?;
+      res
+    } else {
+      None
+    }
   }
 
   #[logfn_inputs(Trace)]
-  fn _left_rule(&self, key: RuleKey) {
+  fn _leftpoline(&self, key: RuleKey) {
     // dummy
   }
   
   #[logfn(Trace)]
   /// Marks a rule as left-recursive
-  fn left_rule<T: Copy + Default + 'static + Debug>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
-    self._left_rule(key);
+  fn leftpoline<T: Copy + Default + 'static + Debug>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
+    self._leftpoline(key);
     let mut saved: Option<T> = None;
     let state = self.save();
     let mut len_parsed = state.pos - self.pos;
@@ -436,7 +442,7 @@ impl Parser {
       }
       saved = res;
       // save the value in the memo for left "call"
-      self.memos.insert(key, Box::new(saved));
+      self.memos[key.0] = Some(Box::new(saved));
       len_parsed = new_len;
     }
     saved
@@ -464,6 +470,8 @@ impl Parser {
     Some(bookend)
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_string(&mut self) -> Option<Node> {
     self.yield_tok(Tok::Str, |s| {
       s.select([
@@ -484,13 +492,17 @@ impl Parser {
       Some(Node::Leaf { tok: tok, value: self.push_value(Val::Bool(value)) })
     })
   }
+  
   fn r_true(&mut self) -> Option<Node> {
     self.match_bool("true", true)
   }
+
   fn r_false(&mut self) -> Option<Node> {
     self.match_bool("false", false)
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_bool(&mut self) -> Option<Node> {
     self.select([
       |s|{s.r_true()},
@@ -503,7 +515,8 @@ impl Parser {
   fn match_star(&mut self) -> Option<char> { self.char('*') }
   fn match_fslash(&mut self) -> Option<char> { self.char('/') }
 
-
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_term_literal(&mut self) -> Option<Node> {
     self.select([
       |s|{s.r_num()},
@@ -519,6 +532,8 @@ impl Parser {
     self.push_tok(Tok::RPar, |s|s.char(')'))
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_term_paren(&mut self) -> Option<Node> {
     self.match_lpar()?;
     let expr = self.r_expr()?;
@@ -526,6 +541,8 @@ impl Parser {
     Some(expr)
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_term(&mut self) -> Option<Node> {
     self.select([
       |s|s.r_term_literal(),
@@ -545,6 +562,8 @@ impl Parser {
     })
   }
 
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
   fn r_expr_binop(&mut self) -> Option<Node> {
     let lnode = self.r_term()?;
     let left = self.push_node(lnode);
@@ -557,6 +576,7 @@ impl Parser {
     Some(Node::BinOp { op: op, lhs: left, rhs: right })
   }
 
+  /// Construct a list from a zero_or_more list match
   fn build_list(&mut self, elems: Vec<NodeId>) -> Node  {
     let len = elems.len();
     let clampled_len = min(len, LIST_ELEMS);
@@ -579,17 +599,18 @@ impl Parser {
     }
   }
 
-  fn cat_list(&mut self, lnode: &Node, left: NodeId, right: NodeId) -> Node {
+  /// Construct a list from a left_rec list match
+  fn cons_list(&mut self, lnode: &Node, left: NodeId, right: NodeId) -> Node {
     match lnode {
       &Node::List{elems, len: LIST_ELEMS, link: None} => {
         let empty_node = Node::List{elems: [NodeId(0); LIST_ELEMS], len: 0, link: None};
         let empty = self.push_node(empty_node);
-        let link = self.cat_list(&empty_node, empty, right);
+        let link = self.cons_list(&empty_node, empty, right);
         Node::List{elems: elems, len: LIST_ELEMS + 1, link: Some(self.push_node(link))}
       },
       &Node::List{elems, len, link: Some(link)} => {
         let orig_link = *self.get_node(&link);
-        let new_link_node = self.cat_list(&orig_link, link, right);
+        let new_link_node = self.cons_list(&orig_link, link, right);
         let new_link = self.push_node(new_link_node);
         Node::List{elems: elems, len: len + 1, link: Some(new_link)}
       }
@@ -643,7 +664,7 @@ impl Parser {
     let rnode = self.r_term()?;
     let right = self.push_node(rnode);
 
-    Some(self.cat_list(&lnode, left, right))
+    Some(self.cons_list(&lnode, left, right))
   }
 
   #[logfn(Trace)]
@@ -718,7 +739,7 @@ impl Parser {
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
   fn r_expr(&mut self) -> Option<Node> {
-    self.left_rule(rule_key("expr"), |s|s.match_expr())
+    self.leftpoline(rule_key("expr"), |s|s.match_expr())
   }
 
   pub fn scan(&mut self) -> Vec<String> {
@@ -833,7 +854,6 @@ mod tests {
 
   #[test]
   fn test_parser_tokens() {
-    // let mut p = Parser::new("999");
     let mut p = Parser::new("789+234");
     assert!(p.parse().is_some());
     assert_eq!(p.tokens.len(), 3);
@@ -842,7 +862,6 @@ mod tests {
 
   #[test]
   fn test_parser_strings() {
-    // let mut p = Parser::new("999");
     let mut p = Parser::new("'asdf'");
     assert!(p.parse().is_some());
     assert_eq!(p.tokens.len(), 1);
@@ -897,10 +916,10 @@ mod tests {
     assert!(p.reparse().is_some());
     assert_eq!(p.tok_values(), vec_strings!["1","2","(","3","4","5",")"]);
 
-    p = Parser::new("1,2,3,4,5,6,7,8,9,10");
+    let mut p = Parser::new("1,2,3,4,5,6,7,8,9,10,11,12");
     let list_opt = p.parse();
     assert!(list_opt.is_some());
-    assert_eq!(p.tok_values(), vec_strings!["1","2","3","4","5","6","7","8","9","10"]);
+    assert_eq!(p.tok_values(), vec_strings!["1","2","3","4","5","6","7","8","9","10","11","12"]);
     let list = list_opt.unwrap();
     assert!(match list {
       Node::List { elems: _, len: _, link} => link.is_some(),
@@ -915,16 +934,18 @@ mod tests {
     let list_val = list.eval(&p);
     assert!(matches!(&list_val, _List));
     assert_eq!(list_val, Val::List(vec![
-      Val::Num(Decimal::new(1,0)),
-      Val::Num(Decimal::new(2,0)),
-      Val::Num(Decimal::new(3,0)),
-      Val::Num(Decimal::new(4,0)),
-      Val::Num(Decimal::new(5,0)),
-      Val::Num(Decimal::new(6,0)),
-      Val::Num(Decimal::new(7,0)),
-      Val::Num(Decimal::new(8,0)),
-      Val::Num(Decimal::new(9,0)),
-      Val::Num(Decimal::new(10,0)),
+      Val::Num(dec!(1)),
+      Val::Num(dec!(2)),
+      Val::Num(dec!(3)),
+      Val::Num(dec!(4)),
+      Val::Num(dec!(5)),
+      Val::Num(dec!(6)),
+      Val::Num(dec!(7)),
+      Val::Num(dec!(8)),
+      Val::Num(dec!(9)),
+      Val::Num(dec!(10)),
+      Val::Num(dec!(11)),
+      Val::Num(dec!(12)),
     ]));
   }
 
