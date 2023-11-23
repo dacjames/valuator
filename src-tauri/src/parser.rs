@@ -12,8 +12,9 @@ use rust_decimal::Decimal;
 use log_derive::{logfn, logfn_inputs};
 
 use crate::cell::Val;
-use crate::eval::{EvalContext, Node};
+use crate::eval::{ObjectContext, Node};
 use crate::eval::LIST_ELEMS;
+use crate::tile::TileContext;
 // use crate::tag::Tag;
 
 
@@ -448,16 +449,41 @@ impl Parser {
     saved
   }
 
+  
+  // fn x_num_nonzero(&mut self) -> Option<Node> {
+  //   self.yield_tok(Tok::Num, |s| {
+  //     s.maybe(|s|s.char('-'))?;
+  //     s.class("123456789")?;
+  //     s.zero_or_more(|s|s.class("0123456789"))?;
+  //     s.maybe(|s|s.char('.'))?;
+  //     s.zero_or_more(|s|s.class("0123456789"))
+  //   }).and_then(|tok|{
+  //     let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
+  //     Some(Node::Leaf { tok, value: self.push_value(Val::Num(decval)) })
+  //   })
+  // }
+
+  fn match_num_nonzero(&mut self) -> Option<char> {
+    self.maybe(|s|s.char('-'))?;
+    self.class("123456789")?;
+    self.zero_or_more(|s|s.class("0123456789"))?;
+    self.maybe(|s|s.char('.'))?;
+    self.zero_or_more(|s|s.class("0123456789"))
+  }
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn match_num_zero(&mut self) -> Option<char> {
+    self.char('0') 
+  }
+
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
   fn r_num(&mut self) -> Option<Node> {
-    self.yield_tok(Tok::Num, |s| {
-      s.maybe(|s|s.char('-'))?;
-      s.class("123456789")?;
-      s.zero_or_more(|s|s.class("0123456789"))?;
-      s.maybe(|s|s.char('.'))?;
-      s.zero_or_more(|s|s.class("0123456789"))
-    }).and_then(|tok|{
+    self.yield_tok(Tok::Num, |s|s.select([
+      |s|s.match_num_zero(),
+      |s|s.match_num_nonzero(),
+    ])).and_then(|tok|{
       let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
       Some(Node::Leaf { tok, value: self.push_value(Val::Num(decval)) })
     })
@@ -678,7 +704,9 @@ impl Parser {
     self.yield_tok(Tok::Sym, |s|{
       s.one_or_more(|s|{ s.class_caseins("abcdefghijklmnopqrstuvwxyz") })
     }).and_then(|tok|{
-      Some(Node::Symbol{ tok: tok })
+      // todo cache value
+      let value = self.tok_value(tok);
+      Some(Node::Leaf { tok: tok, value: self.push_value(Val::Str(value)) })
     })
   }
 
@@ -760,14 +788,20 @@ impl Parser {
 }
 
 
-impl EvalContext for Parser {
+impl ObjectContext for Parser {
   fn get_value(&self, node: &ValueId) -> &Val {
     &self.values[node.0 as usize]
   }
   fn get_node(&self, node: &NodeId) -> &Node {
     &self.nodes[node.0 as usize]
   }
+}
+
+impl TileContext for Parser {
   fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
+    panic!("not impl!")
+  }
+  fn get_labels<const CARD: usize>(&self, pos: [String; CARD]) -> Val {
     panic!("not impl!")
   }
 }
@@ -813,6 +847,9 @@ mod tests {
     assert_eq!(p.ws(), Some(' '));
     assert_eq!(p.ws(), None);
 
+    p = Parser::new("0");
+    assert_eq!(p.scan(), vec_strings!["0"]);
+    
     p = Parser::new("111111");
     assert_eq!(p.scan(), vec_strings!["111111"]);
 
@@ -986,7 +1023,7 @@ mod tests {
 
     let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(board, tile);
+    let mut state = EvalState::new(&board, tile);
     let ast = vec![
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
@@ -1013,11 +1050,28 @@ mod tests {
   fn test_eval_index() {
     let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(board, tile);
+    let mut state = EvalState::new(&board, tile);
     let ast = vec![
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(1)))},
       Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(2)))},
       Node::Index{row: NodeId(0), col: NodeId(1)},
+    ];
+
+    state.load(&ast);
+
+    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(Val::Bool(true), res);
+  }
+
+  #[test]
+  fn test_eval_addr() {
+    let (board, tile) = Board::<Cell>::example();
+
+    let mut state = EvalState::new(&board, tile);
+    let ast = vec![
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Str("B".to_owned()))},
+      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Str("3".to_owned()))},
+      Node::Addr{row: NodeId(0), col: NodeId(1)},
     ];
 
     state.load(&ast);

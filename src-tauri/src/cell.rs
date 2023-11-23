@@ -13,7 +13,6 @@ pub trait RenderValue {
   fn render(&self) -> ValueUi;
 }
 
-
 impl RenderCell for f64 {
   fn render(&self) -> CellUi {
     let s = self.to_string();
@@ -97,7 +96,26 @@ impl From<Val> for i64 {
       Bool(b) => if b {1} else {0},
       Float(f) => f as i64,
       Int(i) => i,
+      Str(s)=> s.parse().unwrap(),
       _ => Default::default(),
+    }
+  }
+}
+
+impl From<Val> for String {
+  fn from(value: Val) -> Self {
+    use Val::*;
+    match value {
+      Num(d) => d.to_string(),
+      Bool(b) => (if b {"true"} else {"false"}).to_owned(),
+      Float(f) => f.to_string(),
+      Int(i) => i.to_string(),
+      Str(s) => s,
+      List(elems) => {
+        let strs: Vec<String> = elems.iter().map(|e|e.to_string()).collect();
+        strs.join(",")
+      }
+      _ => panic!("to_string not impl"),
     }
   }
 }

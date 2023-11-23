@@ -5,24 +5,31 @@ use crate::board::Board;
 use crate::parser::{ValueId, NodeId, Token};
 use crate::cell::{Val, Cell};
 use crate::tag::Tag;
+use crate::tile::TileContext;
 
-pub trait EvalContext {
-  fn get_value(&self, node: &ValueId) -> &Val;
+pub trait ObjectContext {
+  fn get_value(&self, value: &ValueId) -> &Val;
   fn get_node(&self, node: &NodeId) -> &Node;
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val;
 }
+
+pub trait EvalContext:
+  ObjectContext + TileContext {}
+
+impl<T> EvalContext for T where T:
+  ObjectContext + TileContext {}
   
-pub struct EvalState {
+#[derive(Debug)]
+pub struct EvalState<'a> {
   nodes: HashMap<NodeId, Node>,
   values: HashMap<ValueId, Val>,
   dep_graph: StableGraph<Cell, u32, Directed>,
-  board: Board<Cell>,
+  board: &'a Board<Cell>,
   tile: Tag,
 }
 
 #[allow(unused)]
-impl EvalState {
-  pub fn new(board: Board<>, tile: Tag) -> EvalState {
+impl EvalState<'_> {
+  pub fn new(board: &Board<>, tile: Tag) -> EvalState {
     EvalState{
       nodes: HashMap::new(),
       values: HashMap::new(),
@@ -50,18 +57,27 @@ impl EvalState {
   }
 }
 
-impl EvalContext for EvalState {
+impl ObjectContext for EvalState<'_> {
   fn get_value(&self, value: &ValueId) -> &Val {
     self.values.get(value).unwrap()
   }
   fn get_node(&self, node: &NodeId) -> &Node {
     self.nodes.get(node).unwrap()
   }
+}
+
+impl TileContext for EvalState<'_> {
   fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
     let cell = self.board.get_pos(self.tile, pos);
     cell.value
   }
+  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> Val {
+      let cell = self.board.get_lbl(self.tile, labels);
+      cell.value
+  }
 }
+
+
   
 pub const LIST_ELEMS: usize = 8;
 
@@ -69,7 +85,6 @@ pub const LIST_ELEMS: usize = 8;
 #[allow(unused)]
 pub enum Node {
   Zero{},
-  Symbol{tok: Token},
   Leaf{tok: Token, value: ValueId},
   BinOp{op: char, lhs: NodeId, rhs: NodeId},
   UniOp{op: char, rhs: NodeId},
@@ -156,7 +171,14 @@ impl Node {
         let c: i64 = ctx.get_node(col).eval(ctx).into();
 
         ctx.get_pos([r as usize, c as usize])
+      },
+      Addr { row, col } => {
+        let r: String = ctx.get_node(row).eval(ctx).into();
+        let c: String = ctx.get_node(col).eval(ctx).into();
+
+        ctx.get_labels([r, c])
       }
+
       _ => Val::default(),
     }
   }

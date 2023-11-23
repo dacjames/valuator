@@ -10,10 +10,13 @@ use crate::cell::{CellOps, Cell};
 
 type TileMap<V> = BTreeMap<Tag, Tile<V>>;
 
+
+#[derive(Debug)]
 pub struct Board<V: CellOps = Cell> {
   next_tag: Tag, 
   tiles: TileMap<V>,
 }
+
 impl Board {
   pub fn example() -> (Self, Tag) {
     let mut board = Self::default();

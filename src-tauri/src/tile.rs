@@ -3,12 +3,17 @@
 use crate::tag::Tag;
 use crate::constants::*;
 use crate::handle::Handle;
-use crate::cell::CellOps;
+use crate::cell::{CellOps, Val};
 use crate::rpc::{TileUi, CellUi};
 
 #[derive(Debug)]
 struct CellData<Cell: CellOps, const N: usize> {
   cells: [Cell; N],
+}
+
+pub trait TileContext {
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val;
+  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> Val;
 }
  
 #[derive(Debug)]

@@ -9,6 +9,8 @@ extern crate slog_stdlog;
 extern crate slog_scope;
 extern crate slog_term;
 extern crate slog_async;
+use eval::EvalState;
+use log_derive::{logfn, logfn_inputs};
 use slog::Drain;
 
 mod tile;
@@ -21,7 +23,7 @@ mod rpc;
 mod parser;
 mod eval;
 
-use std::sync::RwLock;
+use std::{sync::RwLock, fmt::Debug};
 
 use rpc::TileUi;
 use tag::Tag;
@@ -31,6 +33,43 @@ use board::Board;
 use cell::Cell;
 use parser::Parser;
 
+
+struct MainContext<'a> {
+  parser: &'a parser::Parser,
+  state: &'a eval::EvalState<'a>,
+}
+
+impl Debug for MainContext<'_> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("MainContext { ... }")
+  }
+}
+
+
+
+impl<'a> eval::ObjectContext for MainContext<'a> {
+  fn get_node(&self, node: &parser::NodeId) -> &eval::Node {
+    self.parser.get_node(node)
+  }
+  fn get_value(&self, node: &parser::ValueId) -> &cell::Val {
+    self.parser.get_value(node)
+  }
+}
+
+
+impl<'a> tile::TileContext for MainContext<'a> {
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> cell::Val {
+    self.state.get_pos(pos)
+  }
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> cell::Val {
+    self.state.get_labels(labels)
+  }
+}
 
 #[derive(Default)]
 struct BoardState{
@@ -108,9 +147,12 @@ fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: Strin
   let formula = value.clone();
 
   let mut p = Parser::new(value);
+  
   match p.parse() {
     Some(node) => {
-      let res = node.eval(&p);
+      let state = EvalState::new(&board, tag);
+      let ctx = MainContext{parser: &p, state: &state};
+      let res = node.eval(&ctx);
       board.set_pos(tag, pos, Cell{
         value: res, 
         formula: formula, 
@@ -126,8 +168,8 @@ fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: Strin
 fn main() {
   let decorator = slog_term::TermDecorator::new().build();
   let drain = slog_term::FullFormat::new(decorator).build().fuse();
-  let drain = slog_async::Async::new(drain).build().fuse();
-  let logger = slog::Logger::root(drain, slog_o!("version" => env!("CARGO_PKG_VERSION")));
+  let drain = slog_async::Async::new(drain).chan_size(1024).build().fuse();
+  let logger = slog::Logger::root(drain, slog_o!("v" => env!("CARGO_PKG_VERSION")));
 
   let _scope_guard = slog_scope::set_global_logger(logger);
   let _log_guard = slog_stdlog::init().unwrap();
