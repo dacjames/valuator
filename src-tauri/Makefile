@@ -1,7 +1,7 @@
 .PHONY: test bench dev
 
 test:
-	cargo test parser::tests
+	cargo test
 
 bench:
 	cargo bench

@@ -85,7 +85,7 @@ pub const LIST_ELEMS: usize = 8;
 #[allow(unused)]
 pub enum Node {
   Zero{},
-  Leaf{tok: Token, value: ValueId},
+  Leaf{value: ValueId},
   BinOp{op: char, lhs: NodeId, rhs: NodeId},
   UniOp{op: char, rhs: NodeId},
   Index{row: NodeId, col: NodeId},
@@ -111,7 +111,7 @@ impl Default for Node {
 impl Node {
   pub fn eval(&self, ctx: &impl EvalContext) -> Val {
     match self {
-      Leaf{tok: _, value} => ctx.get_value(value).to_owned(),
+      Leaf{value} => ctx.get_value(value).to_owned(),
       BinOp{op, lhs, rhs} => {
         let left = ctx.get_node(lhs).eval(ctx);
         let right = ctx.get_node(rhs).eval(ctx);
@@ -166,12 +166,14 @@ impl Node {
         }
         Val::List(vals)
       }
+
       Index { row, col } => {
         let r: i64 = ctx.get_node(row).eval(ctx).into();
         let c: i64 = ctx.get_node(col).eval(ctx).into();
 
         ctx.get_pos([r as usize, c as usize])
       },
+
       Addr { row, col } => {
         let r: String = ctx.get_node(row).eval(ctx).into();
         let c: String = ctx.get_node(col).eval(ctx).into();
@@ -181,5 +183,77 @@ impl Node {
 
       _ => Val::default(),
     }
+  }
+}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::parser::Tok;
+
+  #[test]
+  fn test_eval_basics() {
+    fn dec(num: i64, scale: u32) -> Decimal {
+      Decimal::new(num, scale)
+    }
+
+    let (board, tile) = Board::<Cell>::example();
+
+    let mut state = EvalState::new(&board, tile);
+    let ast = vec![
+      Node::Leaf{value: state.push_value(Val::Num(dec(1, 0)))},
+      Node::Leaf{value: state.push_value(Val::Num(dec(2, 0)))},
+      Node::Leaf{value: state.push_value(Val::Int(2))},
+      Node::Leaf{value: state.push_value(Val::Float(2.0))},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
+      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
+    ];
+
+    state.load(&ast);
+
+    let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
+    assert_eq!(r1, Val::Num(dec(3, 0)));
+
+    let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
+    assert_eq!(r2, Val::Num(dec(3, 0)));
+
+    let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(r3, Val::Num(dec(3, 0)));
+  }
+
+  #[test]
+  fn test_eval_index() {
+    let (board, tile) = Board::<Cell>::example();
+
+    let mut state = EvalState::new(&board, tile);
+    let ast = vec![
+      Node::Leaf{value: state.push_value(Val::Num(dec!(1)))},
+      Node::Leaf{value: state.push_value(Val::Num(dec!(2)))},
+      Node::Index{row: NodeId(0), col: NodeId(1)},
+    ];
+
+    state.load(&ast);
+
+    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(Val::Bool(true), res);
+  }
+
+  #[test]
+  fn test_eval_addr() {
+    let (board, tile) = Board::<Cell>::example();
+
+    let mut state = EvalState::new(&board, tile);
+    let ast = vec![
+      Node::Leaf{value: state.push_value(Val::Str("B".to_owned()))},
+      Node::Leaf{value: state.push_value(Val::Str("3".to_owned()))},
+      Node::Addr{row: NodeId(0), col: NodeId(1)},
+    ];
+
+    state.load(&ast);
+
+    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    assert_eq!(Val::Bool(true), res);
   }
 }

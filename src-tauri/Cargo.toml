@@ -33,6 +33,7 @@ slog-async = "2.8.0"
 slog-json = "2.6.1"
 slog-scope = "4.4.0"
 slog-stdlog = "4.1.1"
+itertools = "0.12.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

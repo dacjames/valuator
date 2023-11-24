@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use rust_decimal::{Decimal, prelude::{FromPrimitive, ToPrimitive}};
 use rust_decimal_macros::dec;
+use itertools::Itertools;
 
 use crate::rpc::*;
 
@@ -68,7 +69,7 @@ pub enum Val {
   Int(i64),
   Str(String),
   List(Vec<Val>),
-  Array{value: Vec<Val>, dims: Vec<u32>},
+  Array{elems: Vec<Val>, axes: Vec<u32>},
   Record{value: Vec<Val>, fields: u32},
 }
 
@@ -82,7 +83,7 @@ impl From<&Val> for Decimal {
       &Int(i) => Decimal::from_i64(i).unwrap_or_default(),
       Str(s) => Decimal::from_str_radix(s, 10).unwrap_or_default(),
       List(_) => Decimal::default(),
-      Array{value: _, dims: _} => Decimal::default(),
+      Array{elems: _, axes: _} => Decimal::default(),
       Record{value: _, fields: _} => Decimal::default(),
     }
   }
@@ -96,7 +97,7 @@ impl From<Val> for i64 {
       Bool(b) => if b {1} else {0},
       Float(f) => f as i64,
       Int(i) => i,
-      Str(s)=> s.parse().unwrap(),
+      Str(s)=> s.parse().unwrap_or_default(),
       _ => Default::default(),
     }
   }
@@ -112,8 +113,11 @@ impl From<Val> for String {
       Int(i) => i.to_string(),
       Str(s) => s,
       List(elems) => {
-        let strs: Vec<String> = elems.iter().map(|e|e.to_string()).collect();
-        strs.join(",")
+        let res: String = elems.into_iter()
+                               .map(|e|Self::from(e))
+                               .intersperse(",".to_owned())
+                               .collect();
+        res
       }
       _ => panic!("to_string not impl"),
     }
@@ -191,7 +195,7 @@ impl ToString for Val {
         value.into_iter()
              .map(ToString::to_string)
              .collect::<Vec<String>>().join(","),
-      Array{value, dims: _} =>
+      Array{elems: value, axes: _} =>
         value.iter()
              .map(ToString::to_string)
              .collect::<Vec<String>>().join(","),
@@ -240,7 +244,7 @@ impl RenderValue for Val {
           typ: TypeUi::List,
           value: value.into_iter().map(|cell| cell.to_string()).collect(),
         }),
-      Array{value, dims} =>
+      Array{elems: value, axes: dims} =>
         ValueUi::A(ArrayValueUi {
           typ: TypeUi::Array,
           value: value.into_iter().map(|cell| cell.to_string()).collect(),
@@ -349,3 +353,18 @@ impl RenderCell for Cell {
 //     }
 //   }
 // }
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_val_string(){
+    use Val::*;
+
+    let s: String = List(vec![Int(1), Int(2), Int(3)]).into();
+    assert_eq!("1,2,3", s)
+  }
+
+}

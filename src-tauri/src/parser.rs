@@ -20,7 +20,7 @@ use crate::tile::TileContext;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
-enum Tok {
+pub enum Tok {
   Nil,
   Num,
   Op,
@@ -47,14 +47,14 @@ pub struct Token {
 }
 
 impl Token {
-  fn new(tag: Tok, pos: u32, len: u16) -> Token {
+  pub fn new(tag: Tok, pos: u32, len: u16) -> Token {
     Token{
       pos: pos,
       len: len,
       tag: tag,
     }
   }
-  fn empty(tag: Tok, pos: u32) -> Token {
+  pub fn empty(tag: Tok, pos: u32) -> Token {
     Token::new(tag, pos, 0)
   }
 }
@@ -485,7 +485,7 @@ impl Parser {
       |s|s.match_num_nonzero(),
     ])).and_then(|tok|{
       let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
-      Some(Node::Leaf { tok, value: self.push_value(Val::Num(decval)) })
+      Some(Node::Leaf { value: self.push_value(Val::Num(decval)) })
     })
   }
 
@@ -508,14 +508,14 @@ impl Parser {
       let pos = tok.pos as usize;
       let end = tok.len as usize + pos;
       let body: String = self.buf[pos+1..end-1].iter().collect();
-      Some(Node::Leaf{ tok: tok, value: self.push_value(Val::Str(body)) })
+      Some(Node::Leaf{ value: self.push_value(Val::Str(body)) })
     })
   }
   fn match_bool(&mut self, needle: &'static str, value: bool) -> Option<Node> {
     self.yield_tok(Tok::KW, |s|{
       s.string(needle)
     }).and_then(|tok|{
-      Some(Node::Leaf { tok: tok, value: self.push_value(Val::Bool(value)) })
+      Some(Node::Leaf { value: self.push_value(Val::Bool(value)) })
     })
   }
   
@@ -706,7 +706,7 @@ impl Parser {
     }).and_then(|tok|{
       // todo cache value
       let value = self.tok_value(tok);
-      Some(Node::Leaf { tok: tok, value: self.push_value(Val::Str(value)) })
+      Some(Node::Leaf { value: self.push_value(Val::Str(value)) })
     })
   }
 
@@ -1015,68 +1015,5 @@ mod tests {
     assert_eq!(RuleKey(0), rule_key("asdf"))
   }
 
-  #[test]
-  fn test_eval_basics() {
-    fn dec(num: i64, scale: u32) -> Decimal {
-      Decimal::new(num, scale)
-    }
-
-    let (board, tile) = Board::<Cell>::example();
-
-    let mut state = EvalState::new(&board, tile);
-    let ast = vec![
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(1, 0)))},
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec(2, 0)))},
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Int(2))},
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Float(2.0))},
-      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(1)},
-      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(2)},
-      Node::BinOp{op: '+', lhs: NodeId(0), rhs: NodeId(3)},
-    ];
-
-    state.load(&ast);
-
-    let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
-    assert_eq!(r1, Val::Num(dec(3, 0)));
-
-    let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
-    assert_eq!(r2, Val::Num(dec(3, 0)));
-
-    let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
-    assert_eq!(r3, Val::Num(dec(3, 0)));
-  }
-
-  #[test]
-  fn test_eval_index() {
-    let (board, tile) = Board::<Cell>::example();
-
-    let mut state = EvalState::new(&board, tile);
-    let ast = vec![
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(1)))},
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Num(dec!(2)))},
-      Node::Index{row: NodeId(0), col: NodeId(1)},
-    ];
-
-    state.load(&ast);
-
-    let res = ast.get(ast.len()-1).unwrap().eval(&state);
-    assert_eq!(Val::Bool(true), res);
-  }
-
-  #[test]
-  fn test_eval_addr() {
-    let (board, tile) = Board::<Cell>::example();
-
-    let mut state = EvalState::new(&board, tile);
-    let ast = vec![
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Str("B".to_owned()))},
-      Node::Leaf{tok: Token::empty(Tok::Num,0), value: state.push_value(Val::Str("3".to_owned()))},
-      Node::Addr{row: NodeId(0), col: NodeId(1)},
-    ];
-
-    state.load(&ast);
-
-    let res = ast.get(ast.len()-1).unwrap().eval(&state);
-    assert_eq!(Val::Bool(true), res);
-  }
+  
 }
