@@ -22,6 +22,7 @@ mod cell;
 mod rpc;
 mod parser;
 mod eval;
+mod err;
 
 use std::{sync::RwLock, fmt::Debug};
 

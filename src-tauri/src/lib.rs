@@ -8,3 +8,4 @@ pub mod rpc;
 pub mod parser;
 pub mod eval;
 pub use parser::Parser;
+pub mod err;

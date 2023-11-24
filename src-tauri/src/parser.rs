@@ -798,10 +798,10 @@ impl ObjectContext for Parser {
 }
 
 impl TileContext for Parser {
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
+  fn get_pos<const CARD: usize>(&self, _pos: [usize; CARD]) -> Val {
     panic!("not impl!")
   }
-  fn get_labels<const CARD: usize>(&self, pos: [String; CARD]) -> Val {
+  fn get_labels<const CARD: usize>(&self, _pos: [String; CARD]) -> Val {
     panic!("not impl!")
   }
 }

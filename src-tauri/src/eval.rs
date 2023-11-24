@@ -190,7 +190,6 @@ impl Node {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::parser::Tok;
 
   #[test]
   fn test_eval_basics() {
