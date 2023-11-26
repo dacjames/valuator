@@ -2,10 +2,21 @@ use std::cmp::min;
 use std::collections::HashMap;
 
 use crate::board::Board;
+use crate::handle::{index_to_pos, pos_to_index, pos_to_cellid};
 use crate::parser::{ValueId, NodeId, Token};
-use crate::cell::{Val, Cell};
-use crate::tag::Tag;
+use crate::cell::{Val, Cell, CellId, self};
+use crate::tile::TileId;
 use crate::tile::TileContext;
+
+use petgraph::data::Build;
+use petgraph::{Graph, Directed};
+use petgraph::prelude::DiGraph;
+use petgraph::stable_graph::{StableGraph, DefaultIx, NodeIndex};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
+use rust_decimal_macros::dec;
+use rustc_hash::FxHashMap;
+
 
 pub trait ObjectContext {
   fn get_value(&self, value: &ValueId) -> &Val;
@@ -18,24 +29,42 @@ pub trait EvalContext:
 impl<T> EvalContext for T where T:
   ObjectContext + TileContext {}
   
+type DepsIx = DefaultIx;
+type DepsGraph = StableGraph<CellId, u32, Directed, DepsIx>;
+type DepsLookup = FxHashMap<CellId, NodeIndex<DepsIx>>;
+
 #[derive(Debug)]
 pub struct EvalState<'a> {
   nodes: HashMap<NodeId, Node>,
   values: HashMap<ValueId, Val>,
-  dep_graph: StableGraph<Cell, u32, Directed>,
+  deps: DepsGraph,
+  lookup: DepsLookup,
+  cell: CellId,
   board: &'a Board<Cell>,
-  tile: Tag,
+  tile: TileId,
 }
 
 #[allow(unused)]
 impl EvalState<'_> {
-  pub fn new(board: &Board<>, tile: Tag) -> EvalState {
+  pub fn new(board: &Board<>, tile_id: TileId, cell_id: CellId) -> EvalState {
+    let mut deps: DepsGraph  = StableGraph::new();
+    let mut lookup = DepsLookup::default();
+    let tile = board.tile(tile_id);
+
+    tile.iter().for_each(|(id, cell)|{
+      let ix = deps.add_node(id);
+      println!("wtf: {id:?}");
+      lookup.insert(id, ix);
+    });
+    
     EvalState{
       nodes: HashMap::new(),
       values: HashMap::new(),
-      dep_graph: StableGraph::new(),
+      deps: deps,
+      lookup: lookup,
+      cell: cell_id,
       board: board,
-      tile: tile,
+      tile: tile_id,
     }
   }
 
@@ -67,13 +96,15 @@ impl ObjectContext for EvalState<'_> {
 }
 
 impl TileContext for EvalState<'_> {
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val {
-    let cell = self.board.get_pos(self.tile, pos);
-    cell.value
+  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell {
+    let cell_id = pos_to_cellid(pos);
+    let dep_ix: NodeIndex = self.lookup[&cell_id];
+    let self_ix: NodeIndex = self.lookup[&self.cell];
+    self.deps.add_edge(self_ix, dep_ix, 1);
+    self.board.get_pos(self.tile, pos)
   }
-  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> Val {
-      let cell = self.board.get_lbl(self.tile, labels);
-      cell.value
+  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell {
+    self.board.get_lbl(self.tile, labels)
   }
 }
 
@@ -94,13 +125,6 @@ pub enum Node {
 }
 
   use Node::*;
-use petgraph::data::Build;
-use petgraph::{Graph, Directed};
-use petgraph::prelude::DiGraph;
-use petgraph::stable_graph::StableGraph;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
-use rust_decimal_macros::dec;
 
 impl Default for Node {
   fn default() -> Self {
@@ -109,12 +133,14 @@ impl Default for Node {
 }
 
 impl Node {
-  pub fn eval(&self, ctx: &impl EvalContext) -> Val {
+  pub fn eval(&self, ctx: &mut impl EvalContext) -> Val {
     match self {
       Leaf{value} => ctx.get_value(value).to_owned(),
       BinOp{op, lhs, rhs} => {
-        let left = ctx.get_node(lhs).eval(ctx);
-        let right = ctx.get_node(rhs).eval(ctx);
+        let lnode = *ctx.get_node(lhs);
+        let rnode = *ctx.get_node(rhs);
+        let left = lnode.eval(ctx);
+        let right = rnode.eval(ctx);
 
         use Val::*;
 
@@ -153,12 +179,13 @@ impl Node {
       List { elems, len, link } => {
         let clamped_len = min(*len, LIST_ELEMS);
         let mut vals: Vec<Val> = elems.iter().take(clamped_len).map(|nid|{
-          let node = ctx.get_node(nid);
+          let node = *ctx.get_node(nid);
           node.eval(ctx)
         }).collect();
 
         if *len > clamped_len {
-          let rest = ctx.get_node(&link.unwrap()).eval(ctx);
+          let get_node = *ctx.get_node(&link.unwrap());
+          let rest = get_node.eval(ctx);
           match rest {
             Val::List(l) => vals.extend(l),
             _ => (),
@@ -168,17 +195,21 @@ impl Node {
       }
 
       Index { row, col } => {
-        let r: i64 = ctx.get_node(row).eval(ctx).into();
-        let c: i64 = ctx.get_node(col).eval(ctx).into();
+        let row = *ctx.get_node(row);
+        let col = *ctx.get_node(col);
+        let r: i64 = row.eval(ctx).into();
+        let c: i64 = col.eval(ctx).into();
 
-        ctx.get_pos([r as usize, c as usize])
+        ctx.get_pos([r as usize, c as usize]).value
       },
 
       Addr { row, col } => {
-        let r: String = ctx.get_node(row).eval(ctx).into();
-        let c: String = ctx.get_node(col).eval(ctx).into();
+        let row = *ctx.get_node(row);
+        let col = *ctx.get_node(col);
+        let r: String = row.eval(ctx).into();
+        let c: String = col.eval(ctx).into();
 
-        ctx.get_labels([r, c])
+        ctx.get_labels([r, c]).value
       }
 
       _ => Val::default(),
@@ -199,7 +230,7 @@ mod tests {
 
     let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile);
+    let mut state = EvalState::new(&board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Num(dec(1, 0)))},
       Node::Leaf{value: state.push_value(Val::Num(dec(2, 0)))},
@@ -212,13 +243,13 @@ mod tests {
 
     state.load(&ast);
 
-    let r1 = ast.get(ast.len()-3).unwrap().eval(&state);
+    let r1 = ast.get(ast.len()-3).unwrap().eval(&mut state);
     assert_eq!(r1, Val::Num(dec(3, 0)));
 
-    let r2 = ast.get(ast.len()-2).unwrap().eval(&state);
+    let r2 = ast.get(ast.len()-2).unwrap().eval(&mut state);
     assert_eq!(r2, Val::Num(dec(3, 0)));
 
-    let r3 = ast.get(ast.len()-1).unwrap().eval(&state);
+    let r3 = ast.get(ast.len()-1).unwrap().eval(&mut state);
     assert_eq!(r3, Val::Num(dec(3, 0)));
   }
 
@@ -226,7 +257,7 @@ mod tests {
   fn test_eval_index() {
     let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile);
+    let mut state = EvalState::new(&board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Num(dec!(1)))},
       Node::Leaf{value: state.push_value(Val::Num(dec!(2)))},
@@ -235,7 +266,7 @@ mod tests {
 
     state.load(&ast);
 
-    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    let res = ast.get(ast.len()-1).unwrap().eval(&mut state);
     assert_eq!(Val::Bool(true), res);
   }
 
@@ -243,7 +274,7 @@ mod tests {
   fn test_eval_addr() {
     let (board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile);
+    let mut state = EvalState::new(&board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Str("B".to_owned()))},
       Node::Leaf{value: state.push_value(Val::Str("3".to_owned()))},
@@ -252,7 +283,7 @@ mod tests {
 
     state.load(&ast);
 
-    let res = ast.get(ast.len()-1).unwrap().eval(&state);
+    let res = ast.get(ast.len()-1).unwrap().eval(&mut state);
     assert_eq!(Val::Bool(true), res);
   }
 }

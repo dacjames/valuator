@@ -1,5 +1,6 @@
+use crate::cell::{CellId, Cell};
 use crate::constants::*;
-use crate::tag::Tag;
+use crate::tile::TileId;
 
 #[allow(unused)]
 pub enum Hdl<const CARD: usize> {
@@ -9,13 +10,38 @@ pub enum Hdl<const CARD: usize> {
   
 #[allow(unused)]
 pub struct LableHdl<const CARD: usize> {
-  pub tag: Tag,
+  pub tag: TileId,
   pub pos: [String; CARD],
 }
 
 pub struct PosHdl<const CARD: usize> {
-  pub tag: Tag,
+  pub tag: TileId,
   pub pos: [usize; CARD],
+}
+
+pub fn pos_to_index(col: usize, row: usize) -> usize {
+  (row * COL_MAX) + col
+}
+
+pub fn index_to_pos(index: usize) -> (usize, usize) {
+  let row = index / COL_MAX;
+  let col = index % COL_MAX;
+  (col, row)
+}
+
+pub fn pos_to_cellid<const CARD: usize>(pos: [usize; CARD]) -> CellId {
+  let mut col = 0;
+  let mut row = 0;
+  if CARD == 1 {
+    col = pos[0];
+  } else if CARD == 2 {
+    col = pos[0];
+    row = pos[1];
+  } else if CARD >= 3 {
+    panic!("bad cardinality")
+  }
+
+  CellId(pos_to_index(col, row) as u32)
 }
 
 
@@ -24,7 +50,7 @@ pub trait Handle<const CARD: usize> {
     return CARD;
   }
 
-  fn tag(&self) -> Tag;
+  fn tag(&self) -> TileId;
   fn index(&self) -> usize;
 
   fn row(&self) -> usize;
@@ -33,7 +59,7 @@ pub trait Handle<const CARD: usize> {
 }
 
 impl<const CARD: usize> Handle<CARD> for PosHdl<CARD> {
-  fn tag(&self) -> Tag {
+  fn tag(&self) -> TileId {
       return self.tag
   }
 
@@ -64,7 +90,7 @@ impl<const CARD: usize> Handle<CARD> for PosHdl<CARD> {
       2 => {
         let col = self.pos[0];
         let row = self.pos[1];
-        (row * COL_MAX) + col
+        pos_to_index(col, row)
       }
       _ => panic!("bad CARD")
     }
@@ -72,7 +98,7 @@ impl<const CARD: usize> Handle<CARD> for PosHdl<CARD> {
 }
 
 impl<const CARD: usize> PosHdl<CARD> {
-  pub fn new(tag: Tag, pos: [usize; CARD]) -> PosHdl<CARD> {
+  pub fn new(tag: TileId, pos: [usize; CARD]) -> PosHdl<CARD> {
     return PosHdl::<CARD> {
       tag: tag,
       pos: pos,

@@ -1,13 +1,13 @@
 use serde::{Serialize, Deserialize};
 use serde_repr::Serialize_repr;
 
-use crate::tag::Tag;
+use crate::tile::TileId;
 
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[allow(non_snake_case)]
 pub struct TileUi {
-  pub tag: Tag,
+  pub tag: TileId,
   pub rows: u32,
   pub cells: Vec<CellUi>,
   pub colLabels: Vec<String>,

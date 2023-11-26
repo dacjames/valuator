@@ -355,6 +355,10 @@ impl RenderCell for Cell {
 // }
 
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CellId(pub u32);
+
+
 #[cfg(test)]
 mod tests {
   use super::*;

@@ -10,11 +10,11 @@ extern crate slog_scope;
 extern crate slog_term;
 extern crate slog_async;
 use eval::EvalState;
+use handle::pos_to_cellid;
 use log_derive::{logfn, logfn_inputs};
 use slog::Drain;
 
 mod tile;
-mod tag;
 mod handle;
 mod constants;
 mod board;
@@ -27,7 +27,7 @@ mod err;
 use std::{sync::RwLock, fmt::Debug};
 
 use rpc::TileUi;
-use tag::Tag;
+use tile::TileId;
 use tauri::State;
 
 use board::Board;
@@ -37,7 +37,7 @@ use parser::Parser;
 
 struct MainContext<'a> {
   parser: &'a parser::Parser,
-  state: &'a eval::EvalState<'a>,
+  state: &'a mut eval::EvalState<'a>,
 }
 
 impl Debug for MainContext<'_> {
@@ -45,8 +45,6 @@ impl Debug for MainContext<'_> {
     f.write_str("MainContext { ... }")
   }
 }
-
-
 
 impl<'a> eval::ObjectContext for MainContext<'a> {
   fn get_node(&self, node: &parser::NodeId) -> &eval::Node {
@@ -61,13 +59,13 @@ impl<'a> eval::ObjectContext for MainContext<'a> {
 impl<'a> tile::TileContext for MainContext<'a> {
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> cell::Val {
+  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> cell::Cell {
     self.state.get_pos(pos)
   }
 
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
-  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> cell::Val {
+  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> cell::Cell {
     self.state.get_labels(labels)
   }
 }
@@ -120,7 +118,7 @@ fn add_tile(state: State<BoardState>) -> board::BoardUi {
 }
 
 #[tauri::command]
-fn add_column(state: State<BoardState>, tag: Tag) -> board::BoardUi {
+fn add_column(state: State<BoardState>, tag: TileId) -> board::BoardUi {
   let mut board = state.board.write().unwrap();
 
   let cols = board.tile(tag).cols;
@@ -131,7 +129,7 @@ fn add_column(state: State<BoardState>, tag: Tag) -> board::BoardUi {
 }
 
 #[tauri::command]
-fn add_row(state: State<BoardState>, tag: Tag) -> board::BoardUi {
+fn add_row(state: State<BoardState>, tag: TileId) -> board::BoardUi {
   let mut board = state.board.write().unwrap();
 
   let rows = board.tile(tag).rows;
@@ -143,7 +141,7 @@ fn add_row(state: State<BoardState>, tag: Tag) -> board::BoardUi {
 }
 
 #[tauri::command]
-fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: String) -> board::BoardUi {
+fn update_cell(state: State<BoardState>, tag: TileId, pos: [usize; 2], value: String) -> board::BoardUi {
   let mut board = state.board.write().unwrap();
   let formula = value.clone();
 
@@ -151,9 +149,9 @@ fn update_cell(state: State<BoardState>, tag: Tag, pos: [usize; 2], value: Strin
   
   match p.parse() {
     Some(node) => {
-      let state = EvalState::new(&board, tag);
-      let ctx = MainContext{parser: &p, state: &state};
-      let res = node.eval(&ctx);
+      let mut state = EvalState::new(&board, tag, pos_to_cellid(pos));
+      let mut ctx = MainContext{parser: &p, state: &mut state};
+      let res = node.eval(&mut ctx);
       board.set_pos(tag, pos, Cell{
         value: res, 
         formula: formula, 

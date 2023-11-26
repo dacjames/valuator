@@ -1,5 +1,4 @@
 pub mod tile;
-pub mod tag;
 pub mod handle;
 pub mod constants;
 pub mod board;

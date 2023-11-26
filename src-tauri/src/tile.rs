@@ -1,9 +1,9 @@
 
+use serde::{Serialize, Deserialize};
 
-use crate::tag::Tag;
 use crate::constants::*;
-use crate::handle::Handle;
-use crate::cell::{CellOps, Val};
+use crate::handle::{Handle, PosHdl};
+use crate::cell::{CellOps, Val, Cell, CellId};
 use crate::rpc::{TileUi, CellUi};
 
 #[derive(Debug)]
@@ -11,22 +11,65 @@ struct CellData<Cell: CellOps, const N: usize> {
   cells: [Cell; N],
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Serialize, Deserialize)]
+pub struct TileId(pub usize);
+
+impl TileId {
+  pub fn next(&self) -> TileId {
+    TileId(self.0 + 1)
+  }
+
+  pub fn handle<const CARD: usize>(&self, pos: [usize; CARD]) -> impl Handle<CARD> {
+    PosHdl::new(*self, pos)
+  }
+}
+
 pub trait TileContext {
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Val;
-  fn get_labels<const CARD: usize>(&self, labels: [String; CARD]) -> Val;
+  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell;
+  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell;
 }
  
 #[derive(Debug)]
 pub struct Tile<Cell: CellOps>{
-  pub tag: Tag,
+  pub tag: TileId,
   pub rows: usize,
   pub cols: usize,
   data: CellData<Cell, {ROW_MAX * COL_MAX}>,
   lbls: [String; ROW_MAX + COL_MAX], 
 }
 
+pub struct TileIter<'a, Cell: CellOps>{
+  tile: &'a Tile<Cell>,
+  curr: usize,
+}
+
+impl<'a, Cell: CellOps> Iterator for TileIter<'a, Cell> {
+  type Item = (CellId, &'a Cell);
+  fn next(&mut self) -> Option<Self::Item> {
+    // TODO remove empty cells from tile iteration
+    if self.curr >= (ROW_MAX * COL_MAX) {
+      return None
+    }
+
+    let id = CellId(self.curr as u32);
+    let cell: &Cell = self.tile.data.cells.get(self.curr).unwrap();
+    self.curr += 1;
+    Some((id, cell))
+  }
+}
+
+impl<Cell: CellOps> Tile<Cell> {
+  pub fn iter<'a>(&'a self) -> TileIter<'a, Cell> {
+    TileIter{
+      tile: self,
+      curr: 0
+    }
+  }
+}
+
+
 pub trait TileTrait<V: CellOps> {
-  fn new(tag: Tag) -> Tile<V>;
+  fn new(tag: TileId) -> Tile<V>;
   fn len(&self) -> usize;
 
   fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> V;
@@ -40,7 +83,7 @@ pub trait TileTrait<V: CellOps> {
 
 
 impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
-  fn new(tag: Tag) -> Tile<Cell> {
+  fn new(tag: TileId) -> Tile<Cell> {
     let mut lbls: [String; ROW_MAX + COL_MAX] = Default::default();
 
     ('a' ..= 'z').take(COL_MAX).enumerate().for_each( |(i, ch)| {
@@ -122,7 +165,6 @@ impl<Cell: CellOps> Tile<Cell> {
     let c = self.cols;
     let r = self.rows;
     let mut cells: Vec<CellUi> = vec![Default::default(); c*r];
-    // let mut cells: Vec<CellUi> = Vec::with_capacity(c*r);
 
     // 0, 0 => 0
     // 0, 1 => 2
@@ -161,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_tile_labels() {
-      let mut t = Tile::<isize>::new(Tag(0));
+      let mut t = Tile::<isize>::new(TileId(0));
       
       let pos1 = t.pos_for(["A".to_owned()]);
       assert_eq!([0], pos1);
@@ -184,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_tile_basics() {
-      let mut t = Tile::<isize>::new(Tag(0));
+      let mut t = Tile::<isize>::new(TileId(0));
       t.set_pos([0, 0],  1);
       t.set_pos([0, 1], 2);
       t.set_pos([1, 0], 3);
@@ -203,7 +245,7 @@ mod tests {
     #[ignore = "test is broken, not the unit"]
     #[test]
     fn test_tile_render() {
-      let mut t = Tile::<isize>::new(Tag(0));
+      let mut t = Tile::<isize>::new(TileId(0));
       t.set_pos([0, 0], 1);
       t.set_pos([0, 1], 2);
       t.set_pos([0, 2], 3);

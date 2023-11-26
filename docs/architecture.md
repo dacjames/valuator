@@ -21,14 +21,42 @@ The Parser is build around a few key components:
 The parser state consists of:
 
 - `pos`. Position in the `buf` to be parsed left
-- Lengths of all the vectors: 
+- Vectors to store parsing objects
   - tokens, nodes, values
   - vectors are cheaply truncated during rollback.
+  - objects may be cached in a future version.
 
 ### Pointer-Free
 
 Nodes in the AST do not contain pointers. Instead, they  using integer identifiers to refer to other nodes (ex: BinOp refers to left and right) and to values (ex: Leaf of value `2.0`).
 
-Avoiding pointers allows ASTs to be created and destroyed efficiently without memory management overhead. Using indexes is safe because the parser manages object lifecycles during parsing. 
+Avoiding pointers allows ASTs to be created and destroyed efficiently with minimal memory management overhead. Indexes do have less compiler checks than references. The parser mitigates this risk by intelligently managing object lifecycles (e.g. cacheing objects during backtracking) and avoid `unsafe` indexing optimizations.
 
-`Node` variants must never contain other Nodes, only `NodeId`.
+`Node` variants be `Copy` and must never contain other Nodes, only `NodeId`.
+
+## Context
+
+Evaluator's architecture employs a pattern we refer to as "Call with Callee". This pattern can be found in the Rust (and Go) std library, with the `Display` trait. The Callee in that casee is the `fmt::Formatter` passed to the fmt method.
+
+In evaluator, the callee argument is called a **Context**. Functions employing this structure are said to be *contextual*. Contexts are implemented as small traits that are composed together to bound the parameters to contextual functions.
+
+### Contextual Functions
+
+- ObjectContext
+  - `get_value(v: ValId) -> Val`
+  - `get_node(n: NodeId) -> Node`
+  
+- ParseContext (TODO)
+  - `get_token(tok: Token) -> String`
+  - `str_token(tok: Token) -> &str`
+  - `get_char(tok: Token, offset: i32) -> char`
+  
+- TileContext
+  - `get_pos(caller: CellId, pos: [usize; CARD]) -> Val`
+  - `cell_pos(caller: CellId, pos: [usize; CARD]) -> (CellId, Cell)`
+  - `get_labels(caller: CellId, labels: [String; CARD]) -> Val`
+  - `cell_labels(caller: CellId, labels: [String; CARD]) -> (CellId, Cell)`
+
+- BoardContext (TODO)
+  - `tile_id(t: TileId()) -> Tile`
+  - `tile_name(name: S) -> Tile`

@@ -4,21 +4,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::rpc::TileUi;
 use crate::tile::{Tile, TileTrait};
-use crate::tag::Tag;
+use crate::tile::TileId;
 use crate::handle::Handle;
 use crate::cell::{CellOps, Cell};
 
-type TileMap<V> = BTreeMap<Tag, Tile<V>>;
+type TileMap<V> = BTreeMap<TileId, Tile<V>>;
 
 
 #[derive(Debug)]
 pub struct Board<V: CellOps = Cell> {
-  next_tag: Tag, 
+  next_tag: TileId, 
   tiles: TileMap<V>,
 }
 
 impl Board {
-  pub fn example() -> (Self, Tag) {
+  pub fn example() -> (Self, TileId) {
     let mut board = Self::default();
     let tag = board.add_tile();
 
@@ -35,7 +35,7 @@ impl Board {
 impl<V: CellOps> Default for Board<V> {
   fn default() -> Board<V> {
     Board {
-      next_tag: Tag::default(),
+      next_tag: TileId::default(),
       tiles: TileMap::new(),
     }
   }
@@ -43,7 +43,7 @@ impl<V: CellOps> Default for Board<V> {
 
 #[allow(unused)]
 impl<V: CellOps> Board<V> {
-  pub fn add_tile(&mut self) -> Tag{
+  pub fn add_tile(&mut self) -> TileId{
     let tile_tag = self.next_tag;
     self.tiles.insert(
       tile_tag, 
@@ -53,15 +53,15 @@ impl<V: CellOps> Board<V> {
     return tile_tag;
   }
 
-  pub fn get_tile(&self, tag: Tag) -> Option<&Tile<V>> {
+  pub fn get_tile(&self, tag: TileId) -> Option<&Tile<V>> {
     self.tiles.get(&tag)
   }
 
-  pub fn tile(&self, tag: Tag) -> &Tile<V> {
+  pub fn tile(&self, tag: TileId) -> &Tile<V> {
     return self.tiles.get(&tag).unwrap()
   }
 
-  pub fn render_tile(&self, tag: Tag) -> TileUi {
+  pub fn render_tile(&self, tag: TileId) -> TileUi {
     return self.tiles.get(&tag).unwrap().render()
   }
 
@@ -72,14 +72,14 @@ impl<V: CellOps> Board<V> {
     }
   }
 
-  pub fn get_pos<const CARD: usize>(&self, tag: Tag, pos: [usize; CARD]) -> V {
+  pub fn get_pos<const CARD: usize>(&self, tag: TileId, pos: [usize; CARD]) -> V {
     return match self.get_tile(tag) {
       Some(tile) => tile.get_pos(pos),
       None => V::default(),
     }
   }
 
-  pub fn get_lbl<const CARD: usize>(&self, tag: Tag, lblbs: [String; CARD]) -> V {
+  pub fn get_lbl<const CARD: usize>(&self, tag: TileId, lblbs: [String; CARD]) -> V {
     return match self.get_tile(tag) {
       Some(tile) => tile.get_lbl(lblbs),
       None => V::default(),
@@ -93,14 +93,14 @@ impl<V: CellOps> Board<V> {
     };
   }
 
-  pub fn set_pos<const CARD: usize>(&mut self, tag: Tag, pos: [usize; CARD], data: impl Into<V>) {
+  pub fn set_pos<const CARD: usize>(&mut self, tag: TileId, pos: [usize; CARD], data: impl Into<V>) {
     match self.tiles.get_mut(&tag) {
       Some(tile) => tile.set_pos(pos, data.into()),
       None => (),
     };
   }
 
-  pub fn set_lbl<const CARD: usize>(&mut self, tag: Tag, lbls: [String; CARD], data: impl Into<V>) {
+  pub fn set_lbl<const CARD: usize>(&mut self, tag: TileId, lbls: [String; CARD], data: impl Into<V>) {
     match self.tiles.get_mut(&tag) {
       Some(tile) => tile.set_lbl(lbls, data.into()),
       None => (),

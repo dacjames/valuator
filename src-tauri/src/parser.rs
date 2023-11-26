@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 // use rustc_hash::FxHashMap;
 use log_derive::{logfn, logfn_inputs};
 
-use crate::cell::Val;
+use crate::cell::{Val, Cell};
 use crate::eval::{ObjectContext, Node};
 use crate::eval::LIST_ELEMS;
 use crate::tile::TileContext;
@@ -798,10 +798,10 @@ impl ObjectContext for Parser {
 }
 
 impl TileContext for Parser {
-  fn get_pos<const CARD: usize>(&self, _pos: [usize; CARD]) -> Val {
+  fn get_pos<const CARD: usize>(&mut self, _pos: [usize; CARD]) -> Cell {
     panic!("not impl!")
   }
-  fn get_labels<const CARD: usize>(&self, _pos: [String; CARD]) -> Val {
+  fn get_labels<const CARD: usize>(&mut self, _pos: [String; CARD]) -> Cell {
     panic!("not impl!")
   }
 }
@@ -968,7 +968,7 @@ mod tests {
       _ => assert!(false),
     };
 
-    let list_val = list.eval(&p);
+    let list_val = list.eval(&mut p);
     assert!(matches!(&list_val, _List));
     assert_eq!(list_val, Val::List(vec![
       Val::Num(dec!(1)),
@@ -992,7 +992,7 @@ mod tests {
     let node = p.parse();
     assert!(node.is_some());
 
-    let res = node.unwrap().eval(&p);
+    let res = node.unwrap().eval(&mut p);
     assert_eq!(res, Val::Num(Decimal::new(21,0)))
   }
 
@@ -1002,7 +1002,7 @@ mod tests {
     let node = p.parse();
     assert!(node.is_some());
 
-    let res = node.unwrap().eval(&p);
+    let res = node.unwrap().eval(&mut p);
     assert_eq!(res, Val::List(vec![
       Val::Num(Decimal::from(1)),
       Val::Num(Decimal::from(2)),
