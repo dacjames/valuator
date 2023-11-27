@@ -3,8 +3,8 @@ use std::fmt;
 
 use serde::{Serialize, Deserialize};
 
-use crate::constants::*;
-use crate::handle::{Handle, PosHdl};
+use crate::{constants::*, cell};
+use crate::handle::{Handle, PosHdl, pos_to_cellid};
 use crate::cell::{CellOps, Val, Cell, CellId};
 use crate::rpc::{TileUi, CellUi};
 
@@ -23,36 +23,42 @@ impl TileId {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum TileRef<const CARD: usize> {
+pub enum CellRef<const CARD: usize> {
   Pos([usize; CARD]),
   Label([String; CARD]),
+  // Id(CellId),
 }
 
-impl<const CARD: usize> From<[usize; CARD]> for TileRef<CARD> {
+impl<const CARD: usize> From<[usize; CARD]> for CellRef<CARD> {
   fn from(value: [usize; CARD]) -> Self {
-    TileRef::Pos(value)
+    CellRef::Pos(value)
   }
 }
 
-impl<const CARD: usize> From<[String; CARD]> for TileRef<CARD> {
+impl<const CARD: usize> From<[String; CARD]> for CellRef<CARD> {
   fn from(value: [String; CARD]) -> Self {
-    TileRef::Label(value)
+    CellRef::Label(value)
   }
 }
+
+// impl<const CARD: usize> From<CellId> for TileRef<CARD> {
+//   fn from(value: [String; CARD]) -> Self {
+//     TileRef::Label(value)
+//   }
+// }
 
 pub trait TileContext {
-  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell;
-  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell;
-  fn get_cell<const CARD: usize, TR: Into<TileRef<CARD>>+fmt::Debug>(&mut self, tileref: TR) -> Cell;
+  // fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell;
+  fn get_cell<const CARD: usize, TR: Into<CellRef<CARD>>+fmt::Debug>(&mut self, tileref: TR) -> (CellId, Cell);
 }
- 
+
 #[derive(Debug)]
 pub struct Tile<Cell: CellOps>{
   pub tag: TileId,
   pub rows: usize,
   pub cols: usize,
   cells: [Cell; ROW_MAX * COL_MAX],
-  lbls: [String; ROW_MAX + COL_MAX], 
+  lbls: [String; ROW_MAX + COL_MAX],
 }
 
 pub struct TileIter<'a, Cell: CellOps>{
@@ -84,23 +90,8 @@ impl<Cell: CellOps> Tile<Cell> {
   }
 }
 
-
-pub trait TileTrait<V: CellOps> {
-  fn new(tag: TileId) -> Tile<V>;
-  fn len(&self) -> usize;
-
-  fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> V;
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> V;
-  fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> V;
-
-  fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: V); 
-  fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: V);
-  fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: V);
-}
-
-
-impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
-  fn new(tag: TileId) -> Tile<Cell> {
+impl<Cell: CellOps>  Tile<Cell>{
+  pub fn new(tag: TileId) -> Tile<Cell> {
     let mut lbls: [String; ROW_MAX + COL_MAX] = Default::default();
 
     ('a' ..= 'z').take(COL_MAX).enumerate().for_each( |(i, ch)| {
@@ -112,7 +103,7 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
     });
 
     let cells: [Cell; ROW_MAX * COL_MAX] = std::array::from_fn(|_| Cell::default());
-    
+
     return Tile {
       tag: tag,
       rows: 0,
@@ -122,33 +113,33 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
     }
   }
 
-  fn len(&self) -> usize {
+  pub fn len(&self) -> usize {
     return self.rows * self.cols;
   }
 
-  fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
+  pub fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
     return self.cells[handle.index()].clone();
   }
 
-  fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell {
+  pub fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell {
     return self.get_hdl(&self.tag.handle(pos));
   }
 
-  fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> Cell {
+  pub fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> Cell {
     let pos = self.pos_for(lbls);
     return self.get_pos(pos);
   }
 
-  fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: Cell) {
+  pub fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: Cell) {
     return self.set_hdl(&self.tag.handle(pos), data)
   }
 
-  fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: Cell) {
+  pub fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: Cell) {
       let pos = self.pos_for(lbls);
       self.set_pos(pos, data);
   }
 
-  fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: Cell) {
+  pub fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: Cell) {
     if handle.row() >= self.rows {
       self.rows = handle.row() + 1;
     }
@@ -158,15 +149,16 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
 
     self.cells[handle.index()] = data;
   }
-}
 
-impl<Cell: CellOps> Tile<Cell> {
+  pub fn get_cell(&self, cell: CellId) -> Cell {
+    return self.cells[cell.0 as usize].clone()
+  }
 
-  fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
+  pub fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
     let mut pos: [usize; CARD] = [0; CARD];
-    
+
     for (i, lbl) in lbls.iter().enumerate() {
-      pos[i] = 
+      pos[i] =
         match self.lbls.iter().position(
           |hay| { hay.eq(lbl) }
         ) {
@@ -177,7 +169,15 @@ impl<Cell: CellOps> Tile<Cell> {
 
     return pos
   }
-  
+
+  pub fn resolve<const CARD: usize, R: Into<CellRef<CARD>>+fmt::Debug>(&self, cellref: R) -> CellId {
+    let cellref: CellRef<CARD> = cellref.into();
+    match cellref {
+      CellRef::Pos(pos) => pos_to_cellid(pos),
+      CellRef::Label(labels) => pos_to_cellid(self.pos_for(labels)),
+    }
+  }
+
   pub fn render(&self) -> TileUi {
     let c = self.cols;
     let r = self.rows;
@@ -195,9 +195,9 @@ impl<Cell: CellOps> Tile<Cell> {
       }
     }
 
-    return TileUi { 
+    return TileUi {
       tag: self.tag,
-      rows: r as u32, 
+      rows: r as u32,
       cells: cells,
       colLabels: self.lbls.iter().take(c).cloned().collect(),
       rowLabels: self.lbls.iter().skip(COL_MAX).take(r).cloned().collect(),
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn test_tile_labels() {
       let mut t = Tile::<isize>::new(TileId(0));
-      
+
       let pos1 = t.pos_for(["A".to_owned()]);
       assert_eq!([0], pos1);
 
@@ -248,7 +248,7 @@ mod tests {
       t.set_pos([0, 1], 2);
       t.set_pos([1, 0], 3);
       t.set_pos([1, 1], 4);
-      
+
 
       assert_eq!(t.get_pos([0]), 1);
       assert_eq!(t.get_pos([0, 0]), 1);
@@ -269,12 +269,12 @@ mod tests {
       t.set_pos([1, 0], 4);
       t.set_pos([1, 1], 5);
       t.set_pos([1, 2], 6);
-      
+
       let ui = t.render();
 
       assert_eq!(ui.cells.len() as u32 / ui.rows, 2);
       assert_eq!(ui.rows, 3);
-      
+
       assert_eq!(ui.colLabels.len(), 2);
       assert_eq!(ui.rowLabels.len(), 3);
 
@@ -284,10 +284,10 @@ mod tests {
       ]);
 
       fn string_cell(value: &str) -> CellUi {
-        return CellUi { 
-          value: ValueUi::V(ScalarValueUi{typ: TypeUi::String, value: value.to_owned()}), 
-          formula: value.to_owned(), 
-          style: String::new(), 
+        return CellUi {
+          value: ValueUi::V(ScalarValueUi{typ: TypeUi::String, value: value.to_owned()}),
+          formula: value.to_owned(),
+          style: String::new(),
         }
       }
 
@@ -295,7 +295,7 @@ mod tests {
         // COL: A          COL: B
         string_cell("1"), string_cell("4"),  // ROW: 1
         string_cell("2"), string_cell("5"),  // ROW: 2
-        string_cell("3"), string_cell("6"),  // ROW: 3  
+        string_cell("3"), string_cell("6"),  // ROW: 3
        ];
 
       assert_eq!(ui.cells, expected_cells);

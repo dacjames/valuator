@@ -59,19 +59,8 @@ impl<'a> eval::ObjectContext for MainContext<'a> {
 impl<'a> tile::TileContext for MainContext<'a> {
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
-  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> cell::Cell {
-    self.state.get_pos(pos)
-  }
-
-  #[logfn(Trace)]
-  #[logfn_inputs(Trace)]
-  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> cell::Cell {
-    self.state.get_labels(labels)
-  }
-  #[logfn(Trace)]
-  #[logfn_inputs(Trace)]
-  fn get_cell<const CARD: usize, TR: Into<tile::TileRef<CARD>>+std::fmt::Debug>(&mut self, tileref: TR) -> Cell {
-    self.state.get_cell(tileref)
+  fn get_cell<const CARD: usize, R: Into<tile::CellRef<CARD>>+std::fmt::Debug>(&mut self, cellref: R) -> (cell::CellId, cell::Cell) {
+    self.state.get_cell(cellref)
   }
 }
 
@@ -151,15 +140,15 @@ fn update_cell(state: State<BoardState>, tag: TileId, pos: [usize; 2], value: St
   let formula = value.clone();
 
   let mut p = Parser::new(value);
-  
+
   match p.parse() {
     Some(node) => {
       let mut state = EvalState::new(&board, tag, pos_to_cellid(pos));
       let mut ctx = MainContext{parser: &p, state: &mut state};
       let res = node.eval(&mut ctx);
       board.set_pos(tag, pos, Cell{
-        value: res, 
-        formula: formula, 
+        value: res,
+        formula: formula,
         style: "".to_owned(),
       });
     },
@@ -183,7 +172,7 @@ fn main() {
   tauri::Builder::default()
     .manage::<BoardState>( BoardState{ board: RwLock::new(Board::<Cell>::default()) })
     .invoke_handler(tauri::generate_handler![
-        board, 
+        board,
         tile,
         add_tile,
         add_column,

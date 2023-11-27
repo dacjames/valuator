@@ -6,7 +6,7 @@ use crate::board::Board;
 use crate::handle::{index_to_pos, pos_to_index, pos_to_cellid};
 use crate::parser::{ValueId, NodeId, Token};
 use crate::cell::{Val, Cell, CellId, self};
-use crate::tile::{TileId, TileRef};
+use crate::tile::{TileId, CellRef};
 use crate::tile::TileContext;
 
 use petgraph::{Graph, Directed};
@@ -28,7 +28,7 @@ pub trait EvalContext:
 
 impl<T> EvalContext for T where T:
   ObjectContext + TileContext {}
-  
+
 type DepsIx = DefaultIx;
 type DepsGraph = StableGraph<CellId, u32, Directed, DepsIx>;
 type DepsLookup = FxHashMap<CellId, NodeIndex<DepsIx>>;
@@ -56,7 +56,7 @@ impl EvalState<'_> {
       println!("wtf: {id:?}");
       lookup.insert(id, ix);
     });
-    
+
     EvalState{
       nodes: HashMap::new(),
       values: HashMap::new(),
@@ -96,28 +96,20 @@ impl ObjectContext for EvalState<'_> {
 }
 
 impl TileContext for EvalState<'_> {
-  fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell {
-    let cell_id = pos_to_cellid(pos);
+  fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, cellref: R) -> (CellId, Cell) {
+    let cellref: CellRef<CARD> = cellref.into();
+    let tile = self.board.get_tile(self.tile).unwrap();
+
+    let cell_id = tile.resolve(cellref);
     let dep_ix: NodeIndex = self.lookup[&cell_id];
     let self_ix: NodeIndex = self.lookup[&self.cell];
     self.deps.add_edge(self_ix, dep_ix, 1);
-    self.board.get_pos(self.tile, pos)
-  }
-  fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell {
-    self.board.get_lbl(self.tile, labels)
-  }
-
-  fn get_cell<const CARD: usize, TR: Into<TileRef<CARD>>>(&mut self, tileref: TR) -> Cell {
-    let tileref: TileRef<CARD> = tileref.into();
-    match tileref {
-      TileRef::Pos(pos) => self.get_cell(pos),
-      TileRef::Label(labels) => self.get_cell(labels),
-    }
+    (cell_id, tile.get_cell(cell_id))
   }
 }
 
 
-  
+
 pub const LIST_ELEMS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -208,7 +200,8 @@ impl Node {
         let r: i64 = row.eval(ctx).into();
         let c: i64 = col.eval(ctx).into();
 
-        ctx.get_pos([r as usize, c as usize]).value
+        let (_id, cell) = ctx.get_cell([r as usize, c as usize]);
+        cell.value
       },
 
       Addr { row, col } => {
@@ -217,7 +210,8 @@ impl Node {
         let r: String = row.eval(ctx).into();
         let c: String = col.eval(ctx).into();
 
-        ctx.get_labels([r, c]).value
+        let (_id, cell) = ctx.get_cell([r, c]);
+        cell.value
       }
 
       _ => Val::default(),

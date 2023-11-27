@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use crate::rpc::TileUi;
-use crate::tile::{Tile, TileTrait};
+use crate::tile::Tile;
 use crate::tile::TileId;
 use crate::handle::Handle;
 use crate::cell::{CellOps, Cell};
@@ -13,7 +13,7 @@ type TileMap<V> = BTreeMap<TileId, Tile<V>>;
 
 #[derive(Debug)]
 pub struct Board<V: CellOps = Cell> {
-  next_tag: TileId, 
+  next_tag: TileId,
   tiles: TileMap<V>,
 }
 
@@ -46,7 +46,7 @@ impl<V: CellOps> Board<V> {
   pub fn add_tile(&mut self) -> TileId{
     let tile_tag = self.next_tag;
     self.tiles.insert(
-      tile_tag, 
+      tile_tag,
       Tile::<V>::new(tile_tag),
     );
     self.next_tag = self.next_tag.next();
@@ -112,7 +112,7 @@ impl<V: CellOps> Board<V> {
   }
 
   pub fn render(&self) -> BoardUi {
-    return BoardUi { 
+    return BoardUi {
       tiles: self.tiles.values().map(|t| { t.render() } ).collect(),
     }
   }

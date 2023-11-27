@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 // use rustc_hash::FxHashMap;
 use log_derive::{logfn, logfn_inputs};
 
-use crate::cell::{Val, Cell};
+use crate::cell::{Val, Cell, CellId};
 use crate::eval::{ObjectContext, Node};
 use crate::eval::LIST_ELEMS;
 use crate::tile::TileContext;
@@ -292,8 +292,8 @@ impl Parser {
 
   fn char_caseins(&mut self, needle: char) -> Option<char> {
     let item = self.next()?;
-    if item.to_lowercase().next()? == needle.to_lowercase().next()? { 
-      Some(needle) 
+    if item.to_lowercase().next()? == needle.to_lowercase().next()? {
+      Some(needle)
     } else {
       None
     }
@@ -419,7 +419,7 @@ impl Parser {
   fn _leftpoline(&self, key: RuleKey) {
     // dummy
   }
-  
+
   #[logfn(Trace)]
   /// Marks a rule as left-recursive
   fn leftpoline<T: Copy + Default + 'static + Debug>(&mut self, key: RuleKey, rule: impl Fn(&mut Parser) -> Option<T>) -> Option<T> {
@@ -449,7 +449,7 @@ impl Parser {
     saved
   }
 
-  
+
   // fn x_num_nonzero(&mut self) -> Option<Node> {
   //   self.yield_tok(Tok::Num, |s| {
   //     s.maybe(|s|s.char('-'))?;
@@ -474,7 +474,7 @@ impl Parser {
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
   fn match_num_zero(&mut self) -> Option<char> {
-    self.char('0') 
+    self.char('0')
   }
 
   #[logfn(Trace)]
@@ -518,7 +518,7 @@ impl Parser {
       Some(Node::Leaf { value: self.push_value(Val::Bool(value)) })
     })
   }
-  
+
   fn r_true(&mut self) -> Option<Node> {
     self.match_bool("true", true)
   }
@@ -607,7 +607,7 @@ impl Parser {
     let len = elems.len();
     let clampled_len = min(len, LIST_ELEMS);
 
-    if len <= clampled_len { 
+    if len <= clampled_len {
       let padding = vec![NodeId(0); LIST_ELEMS - clampled_len];
       let extended = [elems, padding].concat();
       return Node::List {
@@ -643,13 +643,13 @@ impl Parser {
       &Node::List{mut elems, len, link} => {
         elems[len] = right;
         Node::List{elems: elems, len: len+1, link: link}
-      }, 
+      },
       _ => {
         let mut elems = [NodeId(0); LIST_ELEMS];
         elems[0] = left;
         elems[1] = right;
         Node::List{elems: elems, len: 2, link: None}
-      }, 
+      },
     }
   }
 
@@ -763,7 +763,7 @@ impl Parser {
     self.maybe_ws()?;
     Some(res)
   }
-  
+
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
   fn r_expr(&mut self) -> Option<Node> {
@@ -798,13 +798,7 @@ impl ObjectContext for Parser {
 }
 
 impl TileContext for Parser {
-  fn get_pos<const CARD: usize>(&mut self, _pos: [usize; CARD]) -> Cell {
-    panic!("not impl!")
-  }
-  fn get_labels<const CARD: usize>(&mut self, _pos: [String; CARD]) -> Cell {
-    panic!("not impl!")
-  }
-  fn get_cell<const CARD: usize, TR: Into<crate::tile::TileRef<CARD>>>(&mut self, tileref: TR) -> Cell {
+  fn get_cell<const CARD: usize, TR: Into<crate::tile::CellRef<CARD>>>(&mut self, tileref: TR) ->(CellId, Cell) {
     panic!("not impl!")
   }
 }
@@ -852,7 +846,7 @@ mod tests {
 
     p = Parser::new("0");
     assert_eq!(p.scan(), vec_strings!["0"]);
-    
+
     p = Parser::new("111111");
     assert_eq!(p.scan(), vec_strings!["111111"]);
 
@@ -916,7 +910,7 @@ mod tests {
   #[test]
   fn test_parser_index() {
     // let _scope_guard = test_logger();
-    
+
     let mut p = Parser::new("[1, 2]");
     let res = p.parse();
     assert!(res.is_some());
@@ -1018,5 +1012,5 @@ mod tests {
     assert_eq!(RuleKey(0), rule_key("asdf"))
   }
 
-  
+
 }
