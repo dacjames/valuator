@@ -3,8 +3,8 @@ use std::fmt;
 
 use serde::{Serialize, Deserialize};
 
-use crate::{constants::*, cell};
-use crate::handle::{Handle, PosHdl, pos_to_cellid};
+use crate::constants::*;
+use crate::handle::pos_to_cellid;
 use crate::cell::{CellOps, Val, Cell, CellId};
 use crate::rpc::{TileUi, CellUi};
 
@@ -16,17 +16,13 @@ impl TileId {
   pub fn next(&self) -> TileId {
     TileId(self.0 + 1)
   }
-
-  pub fn handle<const CARD: usize>(&self, pos: [usize; CARD]) -> impl Handle<CARD> {
-    PosHdl::new(*self, pos)
-  }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum CellRef<const CARD: usize> {
   Pos([usize; CARD]),
   Label([String; CARD]),
-  // Id(CellId),
+  Id(CellId),
 }
 
 impl<const CARD: usize> From<[usize; CARD]> for CellRef<CARD> {
@@ -41,14 +37,13 @@ impl<const CARD: usize> From<[String; CARD]> for CellRef<CARD> {
   }
 }
 
-// impl<const CARD: usize> From<CellId> for TileRef<CARD> {
-//   fn from(value: [String; CARD]) -> Self {
-//     TileRef::Label(value)
-//   }
-// }
+impl<const CARD: usize> From<CellId> for CellRef<CARD> {
+  fn from(value: CellId) -> Self {
+    CellRef::Id(value)
+  }
+}
 
 pub trait TileContext {
-  // fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell;
   fn get_cell<const CARD: usize, TR: Into<CellRef<CARD>>+fmt::Debug>(&mut self, tileref: TR) -> (CellId, Cell);
 }
 
@@ -117,44 +112,25 @@ impl<Cell: CellOps>  Tile<Cell>{
     return self.rows * self.cols;
   }
 
-  pub fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
-    return self.cells[handle.index()].clone();
-  }
-
-  pub fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell {
-    return self.get_hdl(&self.tag.handle(pos));
-  }
-
-  pub fn get_lbl<const CARD: usize>(&self, lbls: [String; CARD]) -> Cell {
-    let pos = self.pos_for(lbls);
-    return self.get_pos(pos);
-  }
-
-  pub fn set_pos<const CARD: usize>(&mut self, pos: [usize; CARD], data: Cell) {
-    return self.set_hdl(&self.tag.handle(pos), data)
-  }
-
-  pub fn set_lbl<const CARD: usize>(&mut self, lbls: [String; CARD], data: Cell) {
-      let pos = self.pos_for(lbls);
-      self.set_pos(pos, data);
-  }
-
-  pub fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: Cell) {
-    if handle.row() >= self.rows {
-      self.rows = handle.row() + 1;
-    }
-    if handle.col() >= self.cols {
-      self.cols = handle.col() + 1;
-    }
-
-    self.cells[handle.index()] = data;
-  }
-
-  pub fn get_cell(&self, cell: CellId) -> Cell {
+  pub fn get_cell_by_id(&self, cell: CellId) -> Cell {
     return self.cells[cell.0 as usize].clone()
   }
 
-  pub fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
+  pub fn set_cell_by_id(&mut self, cell: CellId, data: Cell) {
+    self.cells[cell.0 as usize] = data;
+  }
+
+  pub fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&self, cellref: R) -> Cell {
+    let cellid = self.resolve(cellref);
+    self.get_cell_by_id(cellid)
+  }
+
+  pub fn set_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, cellref: R, data: Cell) {
+    let cellid = self.resolve(cellref);
+    self.set_cell_by_id(cellid, data)
+  }
+
+  fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
     let mut pos: [usize; CARD] = [0; CARD];
 
     for (i, lbl) in lbls.iter().enumerate() {
@@ -170,11 +146,12 @@ impl<Cell: CellOps>  Tile<Cell>{
     return pos
   }
 
-  pub fn resolve<const CARD: usize, R: Into<CellRef<CARD>>+fmt::Debug>(&self, cellref: R) -> CellId {
+  pub fn resolve<const CARD: usize, R: Into<CellRef<CARD>>>(&self, cellref: R) -> CellId {
     let cellref: CellRef<CARD> = cellref.into();
     match cellref {
       CellRef::Pos(pos) => pos_to_cellid(pos),
       CellRef::Label(labels) => pos_to_cellid(self.pos_for(labels)),
+      CellRef::Id(cellid) => cellid,
     }
   }
 
@@ -191,7 +168,7 @@ impl<Cell: CellOps>  Tile<Cell>{
     // 1, 2 => 5
     for ic in 0..c {
       for ir in 0..r {
-        cells[ir * c + ic] = self.get_pos([ic, ir]).render();
+        cells[ir * c + ic] = self.get_cell([ic, ir]).render();
       }
     }
 
@@ -204,10 +181,6 @@ impl<Cell: CellOps>  Tile<Cell>{
     }
   }
 }
-
-
-
-
 
 
 #[cfg(test)]
@@ -231,31 +204,31 @@ mod tests {
       assert_eq!([0, 0], t.pos_for(["A".to_owned(), "1".to_owned()]));
       assert_eq!([0, 1], t.pos_for(["A".to_owned(), "2".to_owned()]));
 
-      t.set_pos([0, 0], 1);
-      t.set_pos([0, 1], 2);
-      t.set_pos([1, 0], 3);
-      t.set_pos([1, 1], 4);
+      t.set_cell([0, 0], 1);
+      t.set_cell([0, 1], 2);
+      t.set_cell([1, 0], 3);
+      t.set_cell([1, 1], 4);
 
-      assert_eq!(t.get_lbl(["A".to_owned()]), 1);
-      assert_eq!(t.get_lbl(["A".to_owned(), "1".to_owned()]), 1);
-      assert_eq!(t.get_lbl(["A".to_owned(), "2".to_owned()]), 2);
+      assert_eq!(t.get_cell(["A".to_owned()]), 1);
+      assert_eq!(t.get_cell(["A".to_owned(), "1".to_owned()]), 1);
+      assert_eq!(t.get_cell(["A".to_owned(), "2".to_owned()]), 2);
     }
 
     #[test]
     fn test_tile_basics() {
       let mut t = Tile::<isize>::new(TileId(0));
-      t.set_pos([0, 0],  1);
-      t.set_pos([0, 1], 2);
-      t.set_pos([1, 0], 3);
-      t.set_pos([1, 1], 4);
+      t.set_cell([0, 0],  1);
+      t.set_cell([0, 1], 2);
+      t.set_cell([1, 0], 3);
+      t.set_cell([1, 1], 4);
 
 
-      assert_eq!(t.get_pos([0]), 1);
-      assert_eq!(t.get_pos([0, 0]), 1);
-      assert_eq!(t.get_pos([0, 1]), 2);
-      assert_eq!(t.get_pos([1]), 3);
-      assert_eq!(t.get_pos([1, 0]), 3);
-      assert_eq!(t.get_pos([1, 1]), 4);
+      assert_eq!(t.get_cell([0]), 1);
+      assert_eq!(t.get_cell([0, 0]), 1);
+      assert_eq!(t.get_cell([0, 1]), 2);
+      assert_eq!(t.get_cell([1]), 3);
+      assert_eq!(t.get_cell([1, 0]), 3);
+      assert_eq!(t.get_cell([1, 1]), 4);
     }
 
     // todo fix test_tile_render
@@ -263,12 +236,12 @@ mod tests {
     #[test]
     fn test_tile_render() {
       let mut t = Tile::<isize>::new(TileId(0));
-      t.set_pos([0, 0], 1);
-      t.set_pos([0, 1], 2);
-      t.set_pos([0, 2], 3);
-      t.set_pos([1, 0], 4);
-      t.set_pos([1, 1], 5);
-      t.set_pos([1, 2], 6);
+      t.set_cell([0, 0], 1);
+      t.set_cell([0, 1], 2);
+      t.set_cell([0, 2], 3);
+      t.set_cell([1, 0], 4);
+      t.set_cell([1, 1], 5);
+      t.set_cell([1, 2], 6);
 
       let ui = t.render();
 

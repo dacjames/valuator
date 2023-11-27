@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use crate::rpc::TileUi;
 use crate::tile::Tile;
 use crate::tile::TileId;
-use crate::handle::Handle;
 use crate::cell::{CellOps, Cell};
 
 type TileMap<V> = BTreeMap<TileId, Tile<V>>;
@@ -65,44 +64,30 @@ impl<V: CellOps> Board<V> {
     return self.tiles.get(&tag).unwrap().render()
   }
 
-  pub fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> V {
-    match self.tiles.get(&handle.tag()) {
-      Some(tile) => tile.get_hdl(handle),
-      None => V::default(),
-    }
-  }
-
   pub fn get_pos<const CARD: usize>(&self, tag: TileId, pos: [usize; CARD]) -> V {
     return match self.get_tile(tag) {
-      Some(tile) => tile.get_pos(pos),
+      Some(tile) => tile.get_cell(pos),
       None => V::default(),
     }
   }
 
   pub fn get_lbl<const CARD: usize>(&self, tag: TileId, lblbs: [String; CARD]) -> V {
     return match self.get_tile(tag) {
-      Some(tile) => tile.get_lbl(lblbs),
+      Some(tile) => tile.get_cell(lblbs),
       None => V::default(),
     }
   }
 
-  pub fn set_hdl<const CARD: usize>(&mut self, handle: &impl Handle<CARD>, data: impl Into<V>) {
-    match self.tiles.get_mut(&handle.tag()) {
-      Some(tile) => tile.set_hdl(handle, data.into()),
-      None => (),
-    };
-  }
-
   pub fn set_pos<const CARD: usize>(&mut self, tag: TileId, pos: [usize; CARD], data: impl Into<V>) {
     match self.tiles.get_mut(&tag) {
-      Some(tile) => tile.set_pos(pos, data.into()),
+      Some(tile) => tile.set_cell(pos, data.into()),
       None => (),
     };
   }
 
   pub fn set_lbl<const CARD: usize>(&mut self, tag: TileId, lbls: [String; CARD], data: impl Into<V>) {
     match self.tiles.get_mut(&tag) {
-      Some(tile) => tile.set_lbl(lbls, data.into()),
+      Some(tile) => tile.set_cell(lbls, data.into()),
       None => (),
     };
   }

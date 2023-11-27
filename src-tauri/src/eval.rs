@@ -104,7 +104,7 @@ impl TileContext for EvalState<'_> {
     let dep_ix: NodeIndex = self.lookup[&cell_id];
     let self_ix: NodeIndex = self.lookup[&self.cell];
     self.deps.add_edge(self_ix, dep_ix, 1);
-    (cell_id, tile.get_cell(cell_id))
+    (cell_id, tile.get_cell_by_id(cell_id))
   }
 }
 

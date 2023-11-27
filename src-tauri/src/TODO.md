@@ -1,5 +1,5 @@
 - [x] Move pos => index to method on tile: `resolve(cell: CellRef) -> CellId`
 - [x] Remove TileTrait interface.
-- [ ] Remove handle abstraction.
+- [x] Remove handle abstraction. tile.get_pos, tile.get_lbls => tile.get_cell()
 - [ ] Add `resolve` to TileContext.
 - [ ] Add a `Entry` API to Tile for updating cells.
