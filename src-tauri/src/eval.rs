@@ -1,3 +1,4 @@
+use core::fmt;
 use std::cmp::min;
 use std::collections::HashMap;
 
@@ -5,10 +6,9 @@ use crate::board::Board;
 use crate::handle::{index_to_pos, pos_to_index, pos_to_cellid};
 use crate::parser::{ValueId, NodeId, Token};
 use crate::cell::{Val, Cell, CellId, self};
-use crate::tile::TileId;
+use crate::tile::{TileId, TileRef};
 use crate::tile::TileContext;
 
-use petgraph::data::Build;
 use petgraph::{Graph, Directed};
 use petgraph::prelude::DiGraph;
 use petgraph::stable_graph::{StableGraph, DefaultIx, NodeIndex};
@@ -105,6 +105,14 @@ impl TileContext for EvalState<'_> {
   }
   fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell {
     self.board.get_lbl(self.tile, labels)
+  }
+
+  fn get_cell<const CARD: usize, TR: Into<TileRef<CARD>>>(&mut self, tileref: TR) -> Cell {
+    let tileref: TileRef<CARD> = tileref.into();
+    match tileref {
+      TileRef::Pos(pos) => self.get_cell(pos),
+      TileRef::Label(labels) => self.get_cell(labels),
+    }
   }
 }
 

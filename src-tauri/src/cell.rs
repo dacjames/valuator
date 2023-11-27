@@ -104,6 +104,7 @@ impl From<Val> for i64 {
 }
 
 impl From<Val> for String {
+  #[allow(unstable_name_collisions)]
   fn from(value: Val) -> Self {
     use Val::*;
     match value {

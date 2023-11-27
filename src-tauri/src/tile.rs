@@ -1,4 +1,6 @@
 
+use std::fmt;
+
 use serde::{Serialize, Deserialize};
 
 use crate::constants::*;
@@ -6,10 +8,6 @@ use crate::handle::{Handle, PosHdl};
 use crate::cell::{CellOps, Val, Cell, CellId};
 use crate::rpc::{TileUi, CellUi};
 
-#[derive(Debug)]
-struct CellData<Cell: CellOps, const N: usize> {
-  cells: [Cell; N],
-}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Serialize, Deserialize)]
 pub struct TileId(pub usize);
@@ -24,9 +22,28 @@ impl TileId {
   }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum TileRef<const CARD: usize> {
+  Pos([usize; CARD]),
+  Label([String; CARD]),
+}
+
+impl<const CARD: usize> From<[usize; CARD]> for TileRef<CARD> {
+  fn from(value: [usize; CARD]) -> Self {
+    TileRef::Pos(value)
+  }
+}
+
+impl<const CARD: usize> From<[String; CARD]> for TileRef<CARD> {
+  fn from(value: [String; CARD]) -> Self {
+    TileRef::Label(value)
+  }
+}
+
 pub trait TileContext {
   fn get_pos<const CARD: usize>(&mut self, pos: [usize; CARD]) -> Cell;
   fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> Cell;
+  fn get_cell<const CARD: usize, TR: Into<TileRef<CARD>>+fmt::Debug>(&mut self, tileref: TR) -> Cell;
 }
  
 #[derive(Debug)]
@@ -34,7 +51,7 @@ pub struct Tile<Cell: CellOps>{
   pub tag: TileId,
   pub rows: usize,
   pub cols: usize,
-  data: CellData<Cell, {ROW_MAX * COL_MAX}>,
+  cells: [Cell; ROW_MAX * COL_MAX],
   lbls: [String; ROW_MAX + COL_MAX], 
 }
 
@@ -52,7 +69,7 @@ impl<'a, Cell: CellOps> Iterator for TileIter<'a, Cell> {
     }
 
     let id = CellId(self.curr as u32);
-    let cell: &Cell = self.tile.data.cells.get(self.curr).unwrap();
+    let cell: &Cell = self.tile.cells.get(self.curr).unwrap();
     self.curr += 1;
     Some((id, cell))
   }
@@ -100,7 +117,7 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
       tag: tag,
       rows: 0,
       cols: 0,
-      data: CellData { cells: cells },
+      cells: cells,
       lbls: lbls,
     }
   }
@@ -110,7 +127,7 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
   }
 
   fn get_hdl<const CARD: usize>(&self, handle: &impl Handle<CARD>) -> Cell {
-    return self.data.cells[handle.index()].clone();
+    return self.cells[handle.index()].clone();
   }
 
   fn get_pos<const CARD: usize>(&self, pos: [usize; CARD]) -> Cell {
@@ -139,7 +156,7 @@ impl<Cell: CellOps> TileTrait<Cell> for Tile<Cell>{
       self.cols = handle.col() + 1;
     }
 
-    self.data.cells[handle.index()] = data;
+    self.cells[handle.index()] = data;
   }
 }
 

@@ -804,6 +804,9 @@ impl TileContext for Parser {
   fn get_labels<const CARD: usize>(&mut self, _pos: [String; CARD]) -> Cell {
     panic!("not impl!")
   }
+  fn get_cell<const CARD: usize, TR: Into<crate::tile::TileRef<CARD>>>(&mut self, tileref: TR) -> Cell {
+    panic!("not impl!")
+  }
 }
 
 #[cfg(test)]

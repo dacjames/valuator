@@ -68,6 +68,11 @@ impl<'a> tile::TileContext for MainContext<'a> {
   fn get_labels<const CARD: usize>(&mut self, labels: [String; CARD]) -> cell::Cell {
     self.state.get_labels(labels)
   }
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn get_cell<const CARD: usize, TR: Into<tile::TileRef<CARD>>+std::fmt::Debug>(&mut self, tileref: TR) -> Cell {
+    self.state.get_cell(tileref)
+  }
 }
 
 #[derive(Default)]
