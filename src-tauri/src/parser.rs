@@ -3,20 +3,17 @@ use std::cmp::min;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::convert::TryInto;
+
 use const_str;
+use log_derive::{logfn, logfn_inputs};
+use rust_decimal::Decimal;
 #[allow(unused)]
 use slog::{info, warn};
 
-use rust_decimal::Decimal;
-// use rustc_hash::FxHashMap;
-use log_derive::{logfn, logfn_inputs};
-
-use crate::cell::{Val, Cell, CellId};
+use crate::cell::{Val, Cell, CellId, CRef};
 use crate::eval::{ObjectContext, Node};
 use crate::eval::LIST_ELEMS;
 use crate::tile::TileContext;
-// use crate::tag::Tag;
-
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
@@ -117,13 +114,11 @@ const fn rule_key(name: &'static str) -> RuleKey {
 
 type MemoArray = [Option<Box<dyn Any>>; N_RULE_KEYS];
 
-// #[derive(Debug)]
 pub struct Parser {
   tokens: Vec<Token>,
   nodes: Vec<Node>,
   values: Vec<Val>,
 
-  // memos: FxHashMap<RuleKey, Box<dyn Any>>,
   memos: MemoArray,
 
   buf: Vec<char>,
@@ -798,7 +793,7 @@ impl ObjectContext for Parser {
 }
 
 impl TileContext for Parser {
-  fn get_cell<const CARD: usize, TR: Into<crate::tile::CellRef<CARD>>>(&mut self, tileref: TR) ->(CellId, Cell) {
+  fn get_cell<const CARD: usize, R: CRef<CARD>>(&mut self, _cref: R) ->(CellId, Cell) {
     panic!("not impl!")
   }
 }
@@ -807,8 +802,6 @@ impl TileContext for Parser {
 mod tests {
   use super::*;
   use rust_decimal_macros::dec;
-  use crate::{board::Board, cell::Cell};
-  use crate::eval::EvalState;
   use slog::{Drain, Logger, o};
 
   macro_rules! vec_strings {

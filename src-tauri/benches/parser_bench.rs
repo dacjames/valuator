@@ -11,7 +11,7 @@ fn bench_parse(c: &mut Criterion) {
   let mut p2 = Parser::new("3*7*(1+1)/2");
   c.bench_function("parse and calc", |b|b.iter(||black_box({
     let node = p2.reparse().unwrap();
-    let res = node.eval(&p2);
+    let res = node.eval(&mut p2);
     res
   })));
 }

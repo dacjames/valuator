@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::rpc::TileUi;
 use crate::tile::Tile;
 use crate::tile::TileId;
-use crate::cell::{CellOps, Cell};
+use crate::cell::{CellOps, Cell, CRef};
 
 type TileMap<V> = BTreeMap<TileId, Tile<V>>;
 
@@ -17,6 +17,7 @@ pub struct Board<V: CellOps = Cell> {
 }
 
 impl Board {
+  #[allow(unused)]
   pub fn example() -> (Self, TileId) {
     let mut board = Self::default();
     let tag = board.add_tile();
@@ -54,6 +55,18 @@ impl<V: CellOps> Board<V> {
 
   pub fn get_tile(&self, tag: TileId) -> Option<&Tile<V>> {
     self.tiles.get(&tag)
+  }
+
+  pub fn mut_tile(&mut self, tag: TileId) -> Option<&mut Tile<V>> {
+    self.tiles.get_mut(&tag)
+  }
+
+  // pub fn eval_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, tile: TileId, cref: R) -> Option<V> {
+  //   self.tiles.get_mut(&tile).and_then(|tile|tile.eval_cell(cref))
+  // }
+
+  pub fn update_cell<const CARD: usize, R: CRef<CARD>>(&mut self, tile: TileId, cref: R, f: impl FnOnce(V) -> V) -> Option<V> {
+    self.tiles.get_mut(&tile).and_then(|tile|tile.update_cell(cref, f))
   }
 
   pub fn tile(&self, tag: TileId) -> &Tile<V> {
@@ -103,6 +116,13 @@ impl<V: CellOps> Board<V> {
   }
 
 }
+
+impl Board<Cell> {
+  pub fn eval_cell<const CARD: usize, R: CRef<CARD>>(&mut self, tileid: TileId, cref: R) -> Option<Cell> {
+    self.tiles.get_mut(&tileid).and_then(|tile|tile.eval_cell(tileid, cref))
+  }
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(non_snake_case)]

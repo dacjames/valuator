@@ -3,15 +3,14 @@
 
 #[macro_use]
 extern crate log;
+
+#[allow(unused)]
 #[macro_use(slog_o, slog_kv)]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_scope;
 extern crate slog_term;
 extern crate slog_async;
-use eval::EvalState;
-use handle::pos_to_cellid;
-use log_derive::{logfn, logfn_inputs};
 use slog::Drain;
 
 mod tile;
@@ -35,36 +34,9 @@ use cell::Cell;
 use parser::Parser;
 
 
-struct MainContext<'a> {
-  parser: &'a parser::Parser,
-  state: &'a mut eval::EvalState<'a>,
-}
-
-impl Debug for MainContext<'_> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_str("MainContext { ... }")
-  }
-}
-
-impl<'a> eval::ObjectContext for MainContext<'a> {
-  fn get_node(&self, node: &parser::NodeId) -> &eval::Node {
-    self.parser.get_node(node)
-  }
-  fn get_value(&self, node: &parser::ValueId) -> &cell::Val {
-    self.parser.get_value(node)
-  }
-}
 
 
-impl<'a> tile::TileContext for MainContext<'a> {
-  #[logfn(Trace)]
-  #[logfn_inputs(Trace)]
-  fn get_cell<const CARD: usize, R: Into<tile::CellRef<CARD>>+std::fmt::Debug>(&mut self, cellref: R) -> (cell::CellId, cell::Cell) {
-    self.state.get_cell(cellref)
-  }
-}
-
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct BoardState{
   board: RwLock<Board<Cell>>
 }
@@ -128,7 +100,6 @@ fn add_row(state: State<BoardState>, tag: TileId) -> board::BoardUi {
 
   let rows = board.tile(tag).rows;
   let cols = board.tile(tag).cols;
-  // println!("wtf: {:?} {:?}", cols, rows);
   board.set_pos(tag, [cols - 1, rows], 0.0);
 
   return board.render()
@@ -137,23 +108,12 @@ fn add_row(state: State<BoardState>, tag: TileId) -> board::BoardUi {
 #[tauri::command]
 fn update_cell(state: State<BoardState>, tag: TileId, pos: [usize; 2], value: String) -> board::BoardUi {
   let mut board = state.board.write().unwrap();
-  let formula = value.clone();
 
-  let mut p = Parser::new(value);
+  board.update_cell(tag, pos, |cell| {
+    Cell { formula: value, ..cell }
+  });
 
-  match p.parse() {
-    Some(node) => {
-      let mut state = EvalState::new(&board, tag, pos_to_cellid(pos));
-      let mut ctx = MainContext{parser: &p, state: &mut state};
-      let res = node.eval(&mut ctx);
-      board.set_pos(tag, pos, Cell{
-        value: res,
-        formula: formula,
-        style: "".to_owned(),
-      });
-    },
-    None => board.set_pos(tag, pos, 0)
-  }
+  board.eval_cell(tag, pos);
 
   return board.render()
 }

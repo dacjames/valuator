@@ -1,11 +1,19 @@
 
+use std::collections::HashMap;
 use std::fmt;
 
+use itertools::Itertools;
+use log_derive::{logfn, logfn_inputs};
+use petgraph::Directed;
+use petgraph::stable_graph::{StableGraph, NodeIndex, DefaultIx};
 use serde::{Serialize, Deserialize};
 
 use crate::constants::*;
-use crate::handle::pos_to_cellid;
-use crate::cell::{CellOps, Val, Cell, CellId};
+use crate::eval::MainContext;
+#[allow(unused)]
+use crate::handle::{pos_to_cellid, index_to_pos, pos_to_index};
+use crate::cell::{CellOps, Val, Cell, CellId, CRef, CellRef};
+use crate::parser::Parser;
 use crate::rpc::{TileUi, CellUi};
 
 
@@ -18,42 +26,31 @@ impl TileId {
   }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum CellRef<const CARD: usize> {
-  Pos([usize; CARD]),
-  Label([String; CARD]),
-  Id(CellId),
-}
-
-impl<const CARD: usize> From<[usize; CARD]> for CellRef<CARD> {
-  fn from(value: [usize; CARD]) -> Self {
-    CellRef::Pos(value)
-  }
-}
-
-impl<const CARD: usize> From<[String; CARD]> for CellRef<CARD> {
-  fn from(value: [String; CARD]) -> Self {
-    CellRef::Label(value)
-  }
-}
-
-impl<const CARD: usize> From<CellId> for CellRef<CARD> {
-  fn from(value: CellId) -> Self {
-    CellRef::Id(value)
-  }
-}
 
 pub trait TileContext {
-  fn get_cell<const CARD: usize, TR: Into<CellRef<CARD>>+fmt::Debug>(&mut self, tileref: TR) -> (CellId, Cell);
+  fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>+fmt::Debug>(&mut self, cellref: R) -> (CellId, Cell);
 }
 
-#[derive(Debug)]
+type DepsIx = DefaultIx;
+type DepsGraph = StableGraph<CellId, u32, Directed, DepsIx>;
+type DepsLookup = HashMap<CellId, NodeIndex<DepsIx>>;
+
 pub struct Tile<Cell: CellOps>{
   pub tag: TileId,
   pub rows: usize,
   pub cols: usize,
   cells: [Cell; ROW_MAX * COL_MAX],
   lbls: [String; ROW_MAX + COL_MAX],
+  pub deps: DepsGraph,
+  pub lookup: DepsLookup,
+}
+
+impl<Cell: CellOps> fmt::Debug for Tile<Cell> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("Tile(")?;
+    f.write_fmt(format_args!("{:?}", self.tag))?;
+    f.write_str(")")
+  }
 }
 
 pub struct TileIter<'a, Cell: CellOps>{
@@ -77,6 +74,7 @@ impl<'a, Cell: CellOps> Iterator for TileIter<'a, Cell> {
 }
 
 impl<Cell: CellOps> Tile<Cell> {
+  #[allow(unused)]
   pub fn iter<'a>(&'a self) -> TileIter<'a, Cell> {
     TileIter{
       tile: self,
@@ -85,8 +83,57 @@ impl<Cell: CellOps> Tile<Cell> {
   }
 }
 
-impl<Cell: CellOps>  Tile<Cell>{
-  pub fn new(tag: TileId) -> Tile<Cell> {
+pub struct TileState<'a> {
+  tile: &'a mut Tile<Cell>,
+  cell: CellId,
+}
+
+impl TileContext for TileState<'_> {
+  fn get_cell<const CARD: usize, R: CRef<CARD>>(&mut self, cref: R) -> (CellId, Cell) {
+    let cellref: CellRef<CARD> = cref.into();
+    self.tile.track_dep(self.cell, cellref.clone());
+    (self.tile.resolve(cellref.clone()), self.tile.get_cell(cellref))  
+  }
+}
+
+impl Tile<Cell> {
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  pub fn eval_cell<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&mut self, tile: TileId, cref: R) -> Option<Cell> {
+    let cellid = self.resolve(cref);
+    let cell = self.get_cell_by_id(cellid);
+    let mut p = Parser::new(cell.formula.clone());
+
+    match p.parse() {
+      Some(node) => {
+        let mut state = TileState{tile: self, cell: cellid};
+        let mut ctx = MainContext{parser: &p, state: &mut state};
+        let res = node.eval(&mut ctx);
+        
+        let deps = self.cell_deps(cellid);
+
+        let cell = Cell{ value: res, ..cell };
+        self.set_cell(cellid, cell.clone());
+
+        for dep in deps {
+          self.eval_cell(tile, dep).map(|c|self.set_cell_by_id(dep, c));
+        }
+
+        Some(cell)
+      },
+      None => {
+        self.update_cell(cellid, |cell|
+          Cell{ value: Val::Str("error".to_owned()), ..cell}
+        );
+        None
+      }
+    }
+    // None
+  }
+}
+
+impl<C: CellOps>  Tile<C>{
+  pub fn new(tag: TileId) -> Tile<C> {
     let mut lbls: [String; ROW_MAX + COL_MAX] = Default::default();
 
     ('a' ..= 'z').take(COL_MAX).enumerate().for_each( |(i, ch)| {
@@ -97,7 +144,7 @@ impl<Cell: CellOps>  Tile<Cell>{
       lbls[COL_MAX + i] = n.to_string();
     });
 
-    let cells: [Cell; ROW_MAX * COL_MAX] = std::array::from_fn(|_| Cell::default());
+    let cells: [C; ROW_MAX * COL_MAX] = std::array::from_fn(|_| C::default());
 
     return Tile {
       tag: tag,
@@ -105,30 +152,72 @@ impl<Cell: CellOps>  Tile<Cell>{
       cols: 0,
       cells: cells,
       lbls: lbls,
+      deps: DepsGraph::default(),
+      lookup: DepsLookup::default(),
     }
   }
 
+  #[allow(unused)]
   pub fn len(&self) -> usize {
     return self.rows * self.cols;
   }
 
-  pub fn get_cell_by_id(&self, cell: CellId) -> Cell {
+  pub fn get_cell_by_id(&self, cell: CellId) -> C {
     return self.cells[cell.0 as usize].clone()
   }
 
-  pub fn set_cell_by_id(&mut self, cell: CellId, data: Cell) {
-    self.cells[cell.0 as usize] = data;
+  pub fn set_cell_by_id(&mut self, cell: CellId, data: C) {
+    let index = cell.0 as usize;
+
+    let (col, row) = index_to_pos(index);
+    if col >= self.cols {
+      self.cols = col + 1;
+    }
+    if row >= self.rows {
+      self.rows = row + 1;
+    }
+
+    let ix = self.deps.add_node(cell);
+    
+    self.lookup.entry(cell).or_insert_with(||ix);
+
+    self.cells[index] = data;
   }
 
-  pub fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&self, cellref: R) -> Cell {
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  pub fn cell_deps<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&self, cellref: R) -> Vec<CellId> {
+    let cellid = self.resolve(cellref);
+    let ix: NodeIndex = self.lookup[&cellid];
+
+    println!("num edges in cell_deps: {:?} {cellid:?} {ix:?}", self.deps.edge_count());
+
+    // println!("WTF deps: {qua:?}");
+
+    self.deps.neighbors(ix)
+      .map(|target|*self.deps.node_weight(target).unwrap())
+      .collect_vec()
+  }
+
+  pub fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&self, cellref: R) -> C {
     let cellid = self.resolve(cellref);
     self.get_cell_by_id(cellid)
   }
 
-  pub fn set_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, cellref: R, data: Cell) {
+  pub fn set_cell<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&mut self, cellref: R, data: C) {
     let cellid = self.resolve(cellref);
     self.set_cell_by_id(cellid, data)
   }
+
+  pub fn update_cell<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&mut self, cellref: R, f: impl FnOnce(C) -> C) -> Option<C>{
+    let cellid = self.resolve(cellref);
+    let old = self.get_cell_by_id(cellid);
+    let new = f(old.clone());
+    println!("update_cell: {old:?} -> {new:?}");
+    self.set_cell_by_id(cellid, new.clone());
+    Some(new)
+  }
+
 
   fn pos_for<const CARD: usize>(&self, lbls: [String; CARD]) -> [usize; CARD] {
     let mut pos: [usize; CARD] = [0; CARD];
@@ -146,7 +235,7 @@ impl<Cell: CellOps>  Tile<Cell>{
     return pos
   }
 
-  pub fn resolve<const CARD: usize, R: Into<CellRef<CARD>>>(&self, cellref: R) -> CellId {
+  pub fn resolve<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&self, cellref: R) -> CellId {
     let cellref: CellRef<CARD> = cellref.into();
     match cellref {
       CellRef::Pos(pos) => pos_to_cellid(pos),
@@ -154,6 +243,24 @@ impl<Cell: CellOps>  Tile<Cell>{
       CellRef::Id(cellid) => cellid,
     }
   }
+
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  pub fn track_dep<const CR: usize, const CQ: usize, R, Q>(&mut self, downstream: R, upstream: Q) -> String
+    where R: Into<CellRef<CR>>+std::fmt::Debug, Q: Into<CellRef<CQ>>+std::fmt::Debug {
+    let downstream = self.resolve(downstream);
+    let upstream = self.resolve(upstream);
+
+    let upstream_ix: NodeIndex = self.lookup[&upstream];
+    let downstream_ix: NodeIndex = self.lookup[&downstream];
+
+    // The edge points upstream -> downstream so we can scan upstream.neighbors()
+    // to recalculate values when upstream changes.
+    self.deps.add_edge(upstream_ix, downstream_ix, 1);
+
+    format_args!("{upstream:?} @ {upstream_ix:?} -> {downstream:?} @ {downstream_ix:?}").to_string()
+  }
+
 
   pub fn render(&self) -> TileUi {
     let c = self.cols;
@@ -272,5 +379,15 @@ mod tests {
        ];
 
       assert_eq!(ui.cells, expected_cells);
+    }
+
+    #[test]
+    fn test_dumb() {
+      let mut map: HashMap<i32, (usize, usize)> = HashMap::new();
+      map.insert(1, (1,1));
+      if let Some(x) = map.get_mut(&1) {
+        x.0 = 2;
+      }
+      assert_eq!(map[&1], (2, 1));
     }
 }

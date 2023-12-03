@@ -1,3 +1,5 @@
+use log_derive::{logfn, logfn_inputs};
+
 use crate::cell::CellId;
 use crate::constants::*;
 
@@ -5,6 +7,8 @@ pub fn pos_to_index(col: usize, row: usize) -> usize {
   (row * COL_MAX) + col
 }
 
+#[logfn(Trace)]
+#[logfn_inputs(Trace)]
 pub fn index_to_pos(index: usize) -> (usize, usize) {
   let row = index / COL_MAX;
   let col = index % COL_MAX;
@@ -12,6 +16,8 @@ pub fn index_to_pos(index: usize) -> (usize, usize) {
 }
 
 // TODO Tile should own cellid calculations
+#[logfn(Trace)]
+#[logfn_inputs(Trace)]
 pub fn pos_to_cellid<const CARD: usize>(pos: [usize; CARD]) -> CellId {
   let mut col = 0;
   let mut row = 0;

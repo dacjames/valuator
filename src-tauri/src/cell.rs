@@ -6,6 +6,8 @@ use itertools::Itertools;
 
 use crate::rpc::*;
 
+
+
 pub trait RenderCell {
   fn render(&self) -> CellUi;
 }
@@ -59,6 +61,39 @@ impl<T> CellOps for T where T:
   ValueOps + RenderCell {
   // This block left intentionally empty
 }
+
+pub trait CRef<const CARD: usize>: 
+  Into<CellRef<CARD>> + std::fmt::Debug {}
+
+impl<T, const CARD: usize> CRef<CARD> for T where T:
+  Into<CellRef<CARD>> + std::fmt::Debug {}
+
+
+  #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+  pub enum CellRef<const CARD: usize> {
+    Pos([usize; CARD]),
+    Label([String; CARD]),
+    Id(CellId),
+  }
+  
+  
+  impl<const CARD: usize> From<[usize; CARD]> for CellRef<CARD> {
+    fn from(value: [usize; CARD]) -> Self {
+      CellRef::Pos(value)
+    }
+  }
+  
+  impl<const CARD: usize> From<[String; CARD]> for CellRef<CARD> {
+    fn from(value: [String; CARD]) -> Self {
+      CellRef::Label(value)
+    }
+  }
+  
+  impl From<CellId> for CellRef<0> {
+    fn from(value: CellId) -> Self {
+      CellRef::Id(value)
+    }
+  }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 #[allow(unused)]

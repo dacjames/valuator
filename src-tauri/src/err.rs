@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
+#[allow(unused)]
 pub enum Err {
   Parse{pos: usize},
   Eval(),

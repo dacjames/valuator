@@ -52,10 +52,8 @@ In evaluator, the callee argument is called a **Context**. Functions employing t
   - `get_char(tok: Token, offset: i32) -> char`
   
 - TileContext
-  - `get_pos(caller: CellId, pos: [usize; CARD]) -> Val`
-  - `cell_pos(caller: CellId, pos: [usize; CARD]) -> (CellId, Cell)`
-  - `get_labels(caller: CellId, labels: [String; CARD]) -> Val`
-  - `cell_labels(caller: CellId, labels: [String; CARD]) -> (CellId, Cell)`
+  - `get_cell(ref: CellRef) -> (CellId, &Cell)`
+  - `set_cwll(cell: CellId, impl Fn)`
 
 - BoardContext (TODO)
   - `tile_id(t: TileId()) -> Tile`

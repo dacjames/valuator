@@ -1,22 +1,47 @@
-use core::fmt;
 use std::cmp::min;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use crate::board::Board;
-use crate::handle::{index_to_pos, pos_to_index, pos_to_cellid};
-use crate::parser::{ValueId, NodeId, Token};
-use crate::cell::{Val, Cell, CellId, self};
-use crate::tile::{TileId, CellRef};
+use crate::parser::{ValueId, NodeId};
+use crate::cell::{Val, Cell, CellId, CellRef};
+use crate::tile::{TileId, TileState};
 use crate::tile::TileContext;
 
-use petgraph::{Graph, Directed};
-use petgraph::prelude::DiGraph;
-use petgraph::stable_graph::{StableGraph, DefaultIx, NodeIndex};
+use log_derive::{logfn, logfn_inputs};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+#[allow(unused)]
 use rust_decimal_macros::dec;
-use rustc_hash::FxHashMap;
 
+pub struct MainContext<'a> {
+  pub parser: &'a dyn ObjectContext,
+  pub state: &'a mut TileState<'a>,
+}
+
+impl Debug for MainContext<'_> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("MainContext { ... }")
+  }
+}
+
+impl<'a> ObjectContext for MainContext<'a> {
+  fn get_node(&self, node: &NodeId) -> &Node {
+    self.parser.get_node(node)
+  }
+  fn get_value(&self, node: &ValueId) -> &Val {
+    self.parser.get_value(node)
+  }
+}
+
+
+impl<'a> TileContext for MainContext<'a> {
+  #[logfn(Trace)]
+  #[logfn_inputs(Trace)]
+  fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>+std::fmt::Debug>(&mut self, cellref: R) -> (CellId, Cell) {
+    self.state.get_cell(cellref)
+  }
+}
 
 pub trait ObjectContext {
   fn get_value(&self, value: &ValueId) -> &Val;
@@ -29,41 +54,23 @@ pub trait EvalContext:
 impl<T> EvalContext for T where T:
   ObjectContext + TileContext {}
 
-type DepsIx = DefaultIx;
-type DepsGraph = StableGraph<CellId, u32, Directed, DepsIx>;
-type DepsLookup = FxHashMap<CellId, NodeIndex<DepsIx>>;
-
 #[derive(Debug)]
 pub struct EvalState<'a> {
   nodes: HashMap<NodeId, Node>,
   values: HashMap<ValueId, Val>,
-  deps: DepsGraph,
-  lookup: DepsLookup,
+  pub board: &'a mut Board<Cell>,
   cell: CellId,
-  board: &'a Board<Cell>,
   tile: TileId,
 }
 
 #[allow(unused)]
 impl EvalState<'_> {
-  pub fn new(board: &Board<>, tile_id: TileId, cell_id: CellId) -> EvalState {
-    let mut deps: DepsGraph  = StableGraph::new();
-    let mut lookup = DepsLookup::default();
-    let tile = board.tile(tile_id);
-
-    tile.iter().for_each(|(id, cell)|{
-      let ix = deps.add_node(id);
-      println!("wtf: {id:?}");
-      lookup.insert(id, ix);
-    });
-
+  pub fn new(board: &mut Board<>, tile_id: TileId, cell_id: CellId) -> EvalState {
     EvalState{
       nodes: HashMap::new(),
       values: HashMap::new(),
-      deps: deps,
-      lookup: lookup,
-      cell: cell_id,
       board: board,
+      cell: cell_id,
       tile: tile_id,
     }
   }
@@ -98,13 +105,11 @@ impl ObjectContext for EvalState<'_> {
 impl TileContext for EvalState<'_> {
   fn get_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, cellref: R) -> (CellId, Cell) {
     let cellref: CellRef<CARD> = cellref.into();
-    let tile = self.board.get_tile(self.tile).unwrap();
+    let tile = self.board.mut_tile(self.tile).unwrap();
+    
+    tile.track_dep(self.cell, cellref.clone());
 
-    let cell_id = tile.resolve(cellref);
-    let dep_ix: NodeIndex = self.lookup[&cell_id];
-    let self_ix: NodeIndex = self.lookup[&self.cell];
-    self.deps.add_edge(self_ix, dep_ix, 1);
-    (cell_id, tile.get_cell_by_id(cell_id))
+    (tile.resolve(cellref.clone()), tile.get_cell(cellref))
   }
 }
 
@@ -230,9 +235,9 @@ mod tests {
       Decimal::new(num, scale)
     }
 
-    let (board, tile) = Board::<Cell>::example();
+    let (mut board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile, CellId(0));
+    let mut state = EvalState::new(&mut board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Num(dec(1, 0)))},
       Node::Leaf{value: state.push_value(Val::Num(dec(2, 0)))},
@@ -257,9 +262,9 @@ mod tests {
 
   #[test]
   fn test_eval_index() {
-    let (board, tile) = Board::<Cell>::example();
+    let (mut board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile, CellId(0));
+    let mut state = EvalState::new(&mut board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Num(dec!(1)))},
       Node::Leaf{value: state.push_value(Val::Num(dec!(2)))},
@@ -274,9 +279,9 @@ mod tests {
 
   #[test]
   fn test_eval_addr() {
-    let (board, tile) = Board::<Cell>::example();
+    let (mut board, tile) = Board::<Cell>::example();
 
-    let mut state = EvalState::new(&board, tile, CellId(0));
+    let mut state = EvalState::new(&mut board, tile, CellId(0));
     let ast = vec![
       Node::Leaf{value: state.push_value(Val::Str("B".to_owned()))},
       Node::Leaf{value: state.push_value(Val::Str("3".to_owned()))},
