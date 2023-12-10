@@ -28,6 +28,7 @@ pub enum Tok {
   LPar, RPar,
   LBck, RBck,
   LBrc, RBrc,
+  At,
 }
 
 impl Default for Tok {
@@ -130,7 +131,7 @@ impl Debug for Parser {
     f.write_str("«")?;
     for (i, ch) in self.buf.iter().enumerate() {
       if i == self.pos {
-        f.write_str("|")?;
+        f.write_str("▶")?;
       }
       f.write_str(ch.to_string().as_str())?;
     }
@@ -444,20 +445,6 @@ impl Parser {
     saved
   }
 
-
-  // fn x_num_nonzero(&mut self) -> Option<Node> {
-  //   self.yield_tok(Tok::Num, |s| {
-  //     s.maybe(|s|s.char('-'))?;
-  //     s.class("123456789")?;
-  //     s.zero_or_more(|s|s.class("0123456789"))?;
-  //     s.maybe(|s|s.char('.'))?;
-  //     s.zero_or_more(|s|s.class("0123456789"))
-  //   }).and_then(|tok|{
-  //     let decval = Decimal::from_str_radix(&self.tok_value(tok), 10).unwrap_or(Decimal::default());
-  //     Some(Node::Leaf { tok, value: self.push_value(Val::Num(decval)) })
-  //   })
-  // }
-
   fn match_num_nonzero(&mut self) -> Option<char> {
     self.maybe(|s|s.char('-'))?;
     self.class("123456789")?;
@@ -535,6 +522,7 @@ impl Parser {
   fn match_minus(&mut self) -> Option<char> { self.char('-') }
   fn match_star(&mut self) -> Option<char> { self.char('*') }
   fn match_fslash(&mut self) -> Option<char> { self.char('/') }
+  fn match_bslash(&mut self) -> Option<char> { self.char('\\') }
 
   #[logfn(Trace)]
   #[logfn_inputs(Trace)]
@@ -738,6 +726,27 @@ impl Parser {
     })
   }
 
+  fn match_legacy_row(&mut self) -> Option<Node> {
+    let r = self.r_num()?;
+    let c = self.r_term_sym()?;
+    Some(Node::Addr { row: self.push_node(r), col: self.push_node(c) })
+  }
+
+  fn match_legacy_col(&mut self) -> Option<Node> {
+    let c = self.r_term_sym()?;
+    let r = self.r_num()?;
+    Some(Node::Addr { row: self.push_node(r), col: self.push_node(c) })
+  }
+
+  fn r_expr_legacy(&mut self) -> Option<Node> {
+    self.yield_tok(Tok::At, |s|s.char('@')).and_then(|tok|{
+      self.select([
+        |s|s.match_legacy_row(),
+        |s|s.match_legacy_col(),
+      ])
+    })
+  }
+
   fn r_expr_lookup(&mut self) -> Option<Node> {
     self.r_term_sym()
   }
@@ -754,6 +763,7 @@ impl Parser {
       |s| s.r_expr_lookup(),
       |s| s.r_expr_index(),
       |s| s.r_expr_addr(),
+      |s| s.r_expr_legacy(),
     ])?;
     self.maybe_ws()?;
     Some(res)
@@ -925,6 +935,24 @@ mod tests {
     let res = p.parse();
     assert!(res.is_some());
     assert_eq!(p.tok_values(), vec_strings!("{", "a", "Z", "}"));
+    let ast = res.unwrap();
+    assert_eq!(Node::Addr { row: NodeId(1), col: NodeId(2) }, ast);
+  }
+
+  #[test]
+  fn test_parser_legacy() {
+    let mut p = Parser::new("@A1");
+    let res = p.parse();
+    assert!(res.is_some());
+    assert_eq!(p.tok_values(), vec_strings!("@", "A", "1"));
+    let ast = res.unwrap();
+    assert_eq!(Node::Addr { row: NodeId(1), col: NodeId(2) }, ast);
+    
+    let mut p = Parser::new("@23B");
+
+    let res = p.parse();
+    assert!(res.is_some());
+    assert_eq!(p.tok_values(), vec_strings!("@", "23", "B"));
     let ast = res.unwrap();
     assert_eq!(Node::Addr { row: NodeId(1), col: NodeId(2) }, ast);
   }

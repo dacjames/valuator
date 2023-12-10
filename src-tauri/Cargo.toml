@@ -25,9 +25,9 @@ scopeguard = "1.2.0"
 rustc-hash = "1.1"
 const-str = "0.5.6"
 petgraph = { version = "0.6.4", features = ["serde-1"] }
-log = "0.4.20"
+log = { version = "0.4.20", features = ["max_level_debug", "release_max_level_info"] }
 log-derive = "0.4.1"
-slog = "2.7.0"
+slog = { version = "2.7.0", features = ["max_level_debug", "release_max_level_info"] }
 slog-term = "2.9.0"
 slog-async = "2.8.0"
 slog-json = "2.6.1"

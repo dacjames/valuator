@@ -61,10 +61,6 @@ impl<V: CellOps> Board<V> {
     self.tiles.get_mut(&tag)
   }
 
-  // pub fn eval_cell<const CARD: usize, R: Into<CellRef<CARD>>>(&mut self, tile: TileId, cref: R) -> Option<V> {
-  //   self.tiles.get_mut(&tile).and_then(|tile|tile.eval_cell(cref))
-  // }
-
   pub fn update_cell<const CARD: usize, R: CRef<CARD>>(&mut self, tile: TileId, cref: R, f: impl FnOnce(V) -> V) -> Option<V> {
     self.tiles.get_mut(&tile).and_then(|tile|tile.update_cell(cref, f))
   }

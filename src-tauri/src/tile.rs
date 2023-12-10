@@ -190,10 +190,6 @@ impl<C: CellOps>  Tile<C>{
     let cellid = self.resolve(cellref);
     let ix: NodeIndex = self.lookup[&cellid];
 
-    println!("num edges in cell_deps: {:?} {cellid:?} {ix:?}", self.deps.edge_count());
-
-    // println!("WTF deps: {qua:?}");
-
     self.deps.neighbors(ix)
       .map(|target|*self.deps.node_weight(target).unwrap())
       .collect_vec()
@@ -213,7 +209,6 @@ impl<C: CellOps>  Tile<C>{
     let cellid = self.resolve(cellref);
     let old = self.get_cell_by_id(cellid);
     let new = f(old.clone());
-    println!("update_cell: {old:?} -> {new:?}");
     self.set_cell_by_id(cellid, new.clone());
     Some(new)
   }

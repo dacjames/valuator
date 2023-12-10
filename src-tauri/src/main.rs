@@ -121,7 +121,7 @@ fn update_cell(state: State<BoardState>, tag: TileId, pos: [usize; 2], value: St
 fn main() {
   let decorator = slog_term::TermDecorator::new().build();
   let drain = slog_term::FullFormat::new(decorator).build().fuse();
-  let drain = slog_async::Async::new(drain).chan_size(1024).build().fuse();
+  let drain = slog_async::Async::new(drain).chan_size(2048).build().fuse();
   let logger = slog::Logger::root(drain, slog_o!("v" => env!("CARGO_PKG_VERSION")));
 
   let _scope_guard = slog_scope::set_global_logger(logger);
